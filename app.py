@@ -1,131 +1,560 @@
 import streamlit as st
 import pandas as pd
-import yfinance as yf
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import requests
-import time
+import yfinance as yf
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-# סודות
-SHEET_ID = st.secrets["SHEET_ID"]
-WHATSAPP_PHONE = st.secrets.get("WHATSAPP_PHONE", "")
-WHATSAPP_API_KEY = st.secrets.get("WHATSAPP_API_KEY", "123456")
+# ==========================================
+# 0. CONFIGURATION & SECRETS
+# ==========================================
+# הקוד מנסה למשוך את הסיסמאות מה"כספת" של סטרימליט בענן
+try:
+    SENDER_EMAIL = st.secrets["SENDER_EMAIL"]
+    SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
+except Exception:
+    # אם אנחנו מריצים במחשב ואין קובץ סודות, המשתנים יהיו ריקים
+    # (האפליקציה תעבוד, אבל המייל לא יישלח עד שנגדיר את הסודות בענן)
+    SENDER_EMAIL = ""
+    SENDER_PASSWORD = ""
 
-st.set_page_config(page_title="StockPulse Pro", layout="wide", page_icon="💹")
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
 
-@st.cache_resource(ttl=1800)
-def get_sheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(SHEET_ID).worksheet("Rules")
+# ==========================================
+# 1. PAGE SETUP
+# ==========================================
+st.set_page_config(
+    page_title="StockPulse Terminal",
+    layout="wide",
+    page_icon="💹",
+    initial_sidebar_state="collapsed"
+)
 
-def load_alerts(email):
+# ==========================================
+# 2. EMAIL FUNCTION
+# ==========================================
+def send_email_alert(to_email, ticker, current_price, target_price, direction, notes):
+    # בדיקה שהוגדרו סיסמאות בענן
+    if not SENDER_EMAIL or not SENDER_PASSWORD:
+        return False, "Secrets not configured in Streamlit Cloud."
+    
     try:
-        data = get_sheet().get_all_records()
-        df = pd.DataFrame(data)
-        if df.empty: return df
-        # תומך גם ב-@gmail.com וגם ב-@gmail.cc
-        df = df[df['user_email'].str.contains(email.split('@')[0], case=False, na=False)]
-        df['min_price'] = pd.to_numeric(df['min_price'], errors='coerce').fillna(0)
-        df['max_price'] = pd.to_numeric(df['max_price'], errors='coerce').fillna(0)
-        df['min_vol'] = pd.to_numeric(df['min_vol'], errors='coerce').fillna(0)
-        df['alert_type'] = df['alert_type'].fillna('מעל')
-        return df[df['status'] == 'Active']
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = f"🚀 StockPulse Alert: {ticker} hit ${current_price:,.2f}"
+
+        body = f"""
+        <html>
+          <body>
+            <h2>Stock Alert Triggered!</h2>
+            <p><strong>Ticker:</strong> {ticker}</p>
+            <p><strong>Trigger Price:</strong> ${current_price:,.2f}</p>
+            <p><strong>Target Was:</strong> ${target_price:,.2f} ({direction})</p>
+            <p><strong>Notes:</strong> {notes}</p>
+            <br>
+            <p>Sent from StockPulse Terminal</p>
+          </body>
+        </html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        text = msg.as_string()
+        server.sendmail(SENDER_EMAIL, to_email, text)
+        server.quit()
+        return True, "Email sent successfully"
     except Exception as e:
-        st.error(f"שגיאה בגיליון: {e}")
-        return pd.DataFrame()
+        return False, str(e)
 
-@st.cache_data(ttl=30)
-def get_stock_data(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="6mo")
-        if hist.empty: return None
-        price = round(hist['Close'].iloc[-1], 2)
-        vol = hist['Volume'].iloc[-1]
-        sma150 = round(hist['Close'].rolling(150).mean().iloc[-1], 2) if len(hist) >= 150 else None
-        prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else price
-        change = round(((price - prev_close) / prev_close) * 100, 2)
-        name = stock.info.get('longName', ticker)[:30]
-        return {'price': price, 'change': change, 'vol': vol, 'sma150': sma150, 'name': name}
-    except:
-        return None
+# ==========================================
+# 3. CSS STYLING
+# ==========================================
+def apply_custom_ui():
+    st.markdown("""
+    <style>
+        /* GLOBAL DARK THEME */
+        .stApp {
+            background-color: #0e0e0e !important;
+            color: #ffffff;
+        }
+        
+        /* INPUT FIELDS STYLING */
+        .stTextInput input, .stNumberInput input, .stTextArea textarea, 
+        .stSelectbox div[data-baseweb="select"] {
+            background-color: #1e1e1e !important; 
+            color: #ffffff !important;
+            border: 1px solid #444 !important;
+        }
+        
+        /* HEADER SETTINGS BAR */
+        .settings-bar {
+            background-color: #1a1a1a;
+            border-bottom: 2px solid #FFC107;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+        }
+        
+        /* METRICS TOP BAR */
+        .metric-container {
+            background-color: #1c1c1e;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #333;
+            margin-bottom: 10px;
+        }
+        .metric-title { font-size: 0.8rem; color: #aaa; text-transform: uppercase; }
+        .metric-value { font-size: 1.3rem; font-weight: bold; color: #fff; }
+        .metric-up { color: #4CAF50; font-size: 0.9rem; }
+        .metric-down { color: #FF5252; font-size: 0.9rem; }
 
-def check_trigger(a, d):
-    if not d: return False
-    p, v = d['price'], d['vol']
-    t = a['alert_type']
-    if t == 'מעל' and p >= a['max_price'] and v >= a['min_vol']: return True
-    if t == 'מתחת' and p <= a['min_price'] and v >= a['min_vol']: return True
-    if t == 'range' and a['min_price'] <= p <= a['max_price'] and v >= a['min_vol']: return True
-    return False
+        /* STICKY NOTES (ALERTS) */
+        .sticky-note {
+            background-color: #F9E79F;
+            color: #222 !important;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.5);
+            position: relative;
+            border-top: 1px solid #fcf3cf;
+        }
+        .sticky-note h4, .sticky-note p, .sticky-note div, .sticky-note span {
+            color: #222 !important;
+        }
+        .note-header {
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 5px; margin-bottom: 8px;
+        }
+        .note-ticker { font-size: 1.4rem; font-weight: 800; }
 
-# עיצוב
-st.markdown("""
-<style>
-    .big{font-size:2.8rem!important;font-weight:bold;color:#00ff88;text-align:center}
-    .card{background:#f8f9fa;padding:20px;border-radius:15px;margin:15px 0;border-left:6px solid #4CAF50}
-    .triggered{border-left-color:#f44336!important;background:#ffebee!important}
-    .rtl{direction:rtl;text-align:right;font-family:Arial,sans-serif}
-    .metric{font-size:1.6em;font-weight:bold}
-</style>
-""", unsafe_allow_html=True)
+        /* TARGET MARKER */
+        .target-marker {
+            display: inline-flex;
+            align-items: center;
+            font-weight: 700;
+            color: #ff5252;
+            font-size: 1.1rem;
+        }
+        
+        /* FORM CONTAINER */
+        .create-form-container {
+            background-color: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        .form-header {
+            color: #FFC107;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
 
-st.markdown('<div class="big rtl">StockPulse Pro</div>', unsafe_allow_html=True)
-st.markdown('<p class="rtl">התראות בזמן אמת • פשוט וברור</p>', unsafe_allow_html=True)
+        /* BUTTONS STYLING */
+        div.stButton > button {
+            background-color: #FFC107 !important;
+            color: #000000 !important; 
+            font-weight: 800 !important;
+            border-radius: 8px !important;
+            border: none !important;
+        }
+        div.stButton > button:hover {
+            background-color: #e0a800 !important;
+            color: #000000 !important;
+        }
+        div.stButton > button:active {
+            color: #000000 !important;
+        }
 
-email = st.text_input("הכנס את המייל שלך", placeholder="orsela@gmail.com")
+        /* CONNECTION GREEN DOT */
+        .connection-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: #00e676;
+            box-shadow: 0 0 10px rgba(0, 230, 118, 0.9);
+            margin-right: 8px;
+            display: inline-block;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 0.2; }
+            50%      { opacity: 1;   }
+        }
+        .connection-bar {
+            display: flex;
+            align-items: center;
+            font-size: 0.9rem;
+            color: #bbb;
+            margin-bottom: 10px;
+            margin-top: 3px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-if not email:
-    st.stop()
+# ==========================================
+# 4. STATE MANAGEMENT
+# ==========================================
 
-# טופס הוספה
-with st.sidebar:
-    st.header("הוסף התראה חדשה")
-    with st.form("new_alert", clear_on_submit=True):
-        symb = st.text_input("סימול", "NVDA")
-        max_p = st.number_input("מחיר יעד", value=100.0)
-        min_v = st.number_input("ווליום מינימלי", value=5000000)
-        typ = st.selectbox("סוג", ["מעל", "מתחת"])
-        notes = st.text_area("הערות", height=80)
-        if st.form_submit_button("שמור התראה"):
-            sheet = get_sheet()
-            sheet.append_row([email, symb.upper(), 0, max_p, min_v, "", "TRUE", "Active", typ, notes, datetime.now().strftime("%d/%m %H:%M")])
-            st.success("נוסף!")
-            st.rerun()
+if 'user_email' not in st.session_state:
+    st.session_state.user_email = ""
+if 'user_phone' not in st.session_state:
+    st.session_state.user_phone = ""
 
-alerts = load_alerts(email)
+if 'active_alerts' not in st.session_state:
+    st.session_state.active_alerts = pd.DataFrame([
+        {
+            "ticker": "NVDA",
+            "target_price": 950.00,
+            "current_price": 900.00,
+            "direction": "Up",
+            "notes": "Strong earnings expected",
+            "created_at": datetime.now(),
+        },
+    ])
 
-if alerts.empty:
-    st.info("אין התראות פעילות – תוסיף אחת בצד!")
-    st.stop()
+if 'completed_alerts' not in st.session_state:
+    st.session_state.completed_alerts = pd.DataFrame(
+        columns=["ticker", "target_price", "final_price", 
+                 "alert_time", "direction", "notes"]
+    )
 
-for _, a in alerts.iterrows():
-    data = get_stock_data(a['symb'])
-    triggered = check_trigger(a, data)
+REFRESH_RATE = 60  # seconds
+
+@st.cache_data(ttl=REFRESH_RATE)
+def get_live_data(tickers):
+    if not tickers:
+        return {}
+    live_data = {}
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            current_price = info.get('regularMarketPrice', 
+                                     info.get('currentPrice', None))
+            close_price = info.get('previousClose', None)
+            display_price = current_price if current_price not in (None, "N/A") else close_price
+            ma150_approx = info.get('twoHundredDayAverage', 
+                                    info.get('fiftyDayAverage', 0))
+            
+            live_data[ticker] = {
+                "price": display_price if display_price is not None else 0.0,
+                "MA150": ma150_approx if ma150_approx is not None else 0.0,
+            }
+        except Exception:
+            live_data[ticker] = {"price": 0.0, "MA150": 0.0}
+    return live_data
+
+def check_alerts():
+    if st.session_state.active_alerts.empty:
+        return
+    tickers = st.session_state.active_alerts['ticker'].tolist()
+    live_data = get_live_data(tickers)
     
-    cls = "triggered" if triggered else ""
-    col = "green" if data and data['change'] > 0 else "red"
+    alerts_to_move = []
+    for index, row in st.session_state.active_alerts.iterrows():
+        ticker = row['ticker']
+        target = row['target_price']
+        direction = row['direction']
+        
+        if ticker in live_data and live_data[ticker]['price'] != 0.0:
+            current = live_data[ticker]['price']
+            st.session_state.active_alerts.loc[index, 'current_price'] = current
+            
+            triggered = False
+            if direction == "Up" and current >= target:
+                triggered = True
+            elif direction == "Down" and current <= target:
+                triggered = True
+                
+            if triggered:
+                current_email = st.session_state.user_email or ""
+                current_phone = st.session_state.user_phone or "No Phone"
+                
+                # --- SEND REAL EMAIL ---
+                email_status = "Skipped"
+                if current_email:
+                    success, msg = send_email_alert(
+                        current_email, ticker, current, target, direction, row['notes']
+                    )
+                    email_status = "Sent" if success else f"Failed ({msg})"
+                else:
+                    email_status = "No Email Provided"
+
+                new_completed = {
+                    "ticker": ticker,
+                    "target_price": target,
+                    "final_price": current,
+                    "alert_time": datetime.now(),
+                    "direction": direction,
+                    "notes": row['notes'] 
+                             + f" (Email Status: {email_status})",
+                }
+                st.session_state.completed_alerts = pd.concat(
+                    [st.session_state.completed_alerts, 
+                     pd.DataFrame([new_completed])], 
+                    ignore_index=True,
+                )
+                alerts_to_move.append(index)
+                
+                st.toast(
+                    f"🚀 Alert Sent! {ticker} @ ${current:,.2f}\n"
+                    f"Email: {email_status}",
+                    icon="📨",
+                )
+
+    if alerts_to_move:
+        st.session_state.active_alerts.drop(alerts_to_move, inplace=True)
+        st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+        st.rerun()
+
+# ==========================================
+# 5. COMPONENT RENDERING
+# ==========================================
+
+def render_header_settings():
+    st.markdown("### 📡 Alert Configuration")
+    st.markdown("Enter destination for alerts. If empty, alerts will log locally only.")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.user_email = st.text_input(
+            "📧 Email Address",
+            value=st.session_state.user_email,
+            placeholder="e.g. name@example.com",
+        )
+    with col2:
+        st.session_state.user_phone = st.text_input(
+            "📱 Mobile Phone",
+            value=st.session_state.user_phone,
+            placeholder="e.g. 050-1234567",
+        )
+    st.write("---")
+
+def render_top_bar():
+    col1, col2, col3, col4 = st.columns(4)
+    metrics = [
+        ("S&P 500", "5,200.50", "down"),
+        ("BITCOIN", "96,250.00", "up"),
+        ("VIX", "13.45", "down"),
+        ("NASDAQ", "17,800.20", "down"),
+    ]
+    cols = [col1, col2, col3, col4]
+    for i, (name, val, direction) in enumerate(metrics):
+        arrow = "⬇" if direction == "down" else "⬆"
+        color_class = "metric-down" if direction == "down" else "metric-up"
+        with cols[i]:
+            st.markdown(f"""
+            <div class="metric-container">
+                <div class="metric-title">{name}</div>
+                <div class="metric-value">{val}</div>
+                <div class="{color_class}">{arrow}</div>
+            </div>""", unsafe_allow_html=True)
+
+def render_sticky_note(ticker, live_data, alert_row, index):
+    data = live_data.get(ticker, {})
+    price = data.get('price', 0.0) or 0.0
+    ma150 = data.get('MA150', 0.0) or 0.0
+
+    target = alert_row['target_price']
+    direction = alert_row['direction']
+    notes = alert_row['notes']
     
+    # Arrow icon based on direction
+    arrow_icon = "⬆" if direction == "Up" else "⬇"
+
     st.markdown(f"""
-    <div class="card {cls} rtl">
-        <h2>{a['symb']} • {data['name'] if data else 'טוען...'}</h2>
-        <p class="metric">${data['price'] if data else '...'} <span style="color:{col}">{data['change'] if data else 0:+.2f}%</span></p>
-        <p>יעד: ${a['max_price']} • ווליום: {data['vol']/1e6:.1f}M</p>
-        {f'<p> SMA150: ${data["sma150"]}</p>' if data and data['sma150'] else ''}
-        {f'<h3 style="color:#f44336">התראה הופעלה! 🚨</h3>' if triggered else ''}
+    <div class="sticky-note">
+        <div class="note-header">
+            <div class="note-ticker">{ticker}</div>
+            <div class="note-target target-marker">
+                {arrow_icon} 🎯 ${target:,.2f}
+            </div>
+        </div>
+        <div class="note-price">Current: ${price:,.2f}</div>
+        <div style="font-size: 0.9em; margin-top:5px;">
+            MA150: ${ma150:,.2f} | Dir: {direction}
+        </div>
+        <div style="margin-top: 10px; font-style: italic; 
+                    background: rgba(255,255,255,0.3); 
+                    padding: 5px; border-radius: 4px;">
+            "{notes}"
+        </div>
     </div>
     """, unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
     
-    if triggered and WHATSAPP_API_KEY != "123456":
-        msg = f"StockPulse: {a['symb']} הגיע ליעד! ${data['price']} ({data['change']:+.2f}%)"
-        requests.get(f"https://api.callmebot.com/whatsapp.php?phone={WHATSAPP_PHONE}&text={requests.utils.quote(msg)}&apikey={WHATSAPP_API_KEY}", timeout=5)
+    # EDIT
+    with c1:
+        with st.popover("✏️ Edit", use_container_width=True):
+            st.markdown("**Update Alert Details**")
+            
+            ed_ticker = st.text_input(
+                "Ticker", value=ticker, key=f"ed_tick_{index}"
+            )
+            ed_price = st.number_input(
+                "Target Price", value=float(target), 
+                format="%.2f", key=f"ed_price_{index}",
+            )
+            ed_dir = st.selectbox(
+                "Direction", ["Up", "Down"], 
+                index=0 if direction == "Up" else 1,
+                key=f"ed_dir_{index}",
+            )
+            ed_notes = st.text_area(
+                "Notes", value=notes, height=80, key=f"ed_note_{index}"
+            )
+            
+            if st.button("💾 Save Changes", key=f"btn_save_{index}"):
+                st.session_state.active_alerts.at[index, 'ticker'] = ed_ticker.upper()
+                st.session_state.active_alerts.at[index, 'target_price'] = ed_price
+                st.session_state.active_alerts.at[index, 'direction'] = ed_dir
+                st.session_state.active_alerts.at[index, 'notes'] = ed_notes
+                st.success("Updated!")
+                st.rerun()
 
-st.caption("מתעדכן כל 30 שניות אוטומטית")
+    # DELETE
+    with c2:
+        if st.button("🗑️ Del", key=f"del_{index}", use_container_width=True):
+            st.session_state.active_alerts.drop(index, inplace=True)
+            st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+            st.rerun()
 
-# ריענון
-time.sleep(1)
-if time.time() - st.session_state.get('last', 0) > 30:
-    st.rerun()
+# ==========================================
+# 6. MAIN APP
+# ==========================================
+
+def main():
+    apply_custom_ui()
+    
+    st.markdown(
+        "<h1 style='text-align: center; color: #FFC107;'>⚡ StockPulse Terminal</h1>", 
+        unsafe_allow_html=True,
+    )
+    
+    render_header_settings()
+    
+    render_top_bar()
+    st.markdown(
+        "<div class='connection-bar'>"
+        "<span class='connection-dot'></span>"
+        "<span>Connected to price server</span>"
+        "</div>", 
+        unsafe_allow_html=True,
+    )
+    check_alerts()
+    
+    st.write("---")
+    
+    col_alerts, col_create = st.columns([1.2, 1], gap="large")
+    
+    with col_alerts:
+        st.markdown("### 🔔 Active Alerts")
+        if not st.session_state.active_alerts.empty:
+            tickers = st.session_state.active_alerts['ticker'].tolist()
+            live_data = get_live_data(tickers)
+            
+            note_cols = st.columns(2)
+            for i, row in st.session_state.active_alerts.iterrows():
+                with note_cols[i % 2]:
+                    render_sticky_note(row['ticker'], live_data, row, i)
+        else:
+            st.info("No active alerts.")
+
+    with col_create:
+        st.markdown('<div class="create-form-container">', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="form-header">➕ Create New Alert</div>', 
+            unsafe_allow_html=True,
+        )
+        
+        with st.form("create_alert_form", clear_on_submit=True):
+            st.markdown("**Ticker Symbol**")
+            st.text_input(
+                "Ticker Symbol", 
+                placeholder="e.g. NVDA",
+                key="new_ticker",
+                label_visibility="collapsed",
+            )
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Target Price ($)**")
+                st.session_state.new_target = st.slider(
+                    "Target", 
+                    min_value=0.0, 
+                    max_value=2000.0, 
+                    value=200.0, 
+                    step=1.0,
+                    key="new_target_slider",
+                    label_visibility="collapsed",
+                )
+            with c2:
+                st.markdown("**Direction**")
+                st.selectbox(
+                    "Direction", 
+                    ["Up", "Down"], 
+                    key="new_direction",
+                    label_visibility="collapsed",
+                )
+                
+            st.markdown("**Notes / Strategy**")
+            st.text_area(
+                "Notes", 
+                placeholder="Strategy details...",
+                height=100,
+                key="new_notes",
+                label_visibility="collapsed",
+            )
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            submitted = st.form_submit_button(
+                "ADD NOTIFICATION ➔", use_container_width=True
+            )
+            
+            if submitted:
+                ticker_in = st.session_state.new_ticker.upper()
+                target_in = st.session_state.new_target
+                
+                if ticker_in and target_in > 0:
+                    new_alert = {
+                        "ticker": ticker_in,
+                        "target_price": target_in,
+                        "current_price": 0.0,
+                        "direction": st.session_state.new_direction,
+                        "notes": (
+                            st.session_state.new_notes 
+                            if st.session_state.new_notes 
+                            else "No notes"
+                        ),
+                        "created_at": datetime.now(),
+                    }
+                    st.session_state.active_alerts = pd.concat(
+                        [st.session_state.active_alerts, 
+                         pd.DataFrame([new_alert])], 
+                        ignore_index=True,
+                    )
+                    st.success(f"Alert for {ticker_in} added!")
+                    st.rerun()
+                else:
+                    st.error("Please enter Ticker and Target.")
+                    
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    st.write("---")
+    with st.expander("📂 View History"):
+        st.dataframe(st.session_state.completed_alerts, use_container_width=True)
+
+if __name__ == "__main__":
+    main()
