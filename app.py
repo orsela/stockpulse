@@ -9,13 +9,10 @@ from email.mime.multipart import MIMEMultipart
 # ==========================================
 # 0. CONFIGURATION & SECRETS
 # ==========================================
-# הקוד מנסה למשוך את הסיסמאות מה"כספת" של סטרימליט בענן
 try:
     SENDER_EMAIL = st.secrets["SENDER_EMAIL"]
     SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
 except Exception:
-    # אם אנחנו מריצים במחשב ואין קובץ סודות, המשתנים יהיו ריקים
-    # (האפליקציה תעבוד, אבל המייל לא יישלח עד שנגדיר את הסודות בענן)
     SENDER_EMAIL = ""
     SENDER_PASSWORD = ""
 
@@ -36,7 +33,6 @@ st.set_page_config(
 # 2. EMAIL FUNCTION
 # ==========================================
 def send_email_alert(to_email, ticker, current_price, target_price, direction, notes):
-    # בדיקה שהוגדרו סיסמאות בענן
     if not SENDER_EMAIL or not SENDER_PASSWORD:
         return False, "Secrets not configured in Streamlit Cloud."
     
@@ -319,7 +315,48 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. COMPONENT RENDERING
+# 5. NEW MARKET DATA FUNCTIONS
+# ==========================================
+
+@st.cache_data(ttl=300) # מרענן כל 5 דקות כדי לא להכביד
+def get_market_data_real():
+    # הממירים (Tickers) של המדדים החשובים
+    indicators = {
+        "S&P 500": "^GSPC",
+        "BITCOIN": "BTC-USD", 
+        "VIX": "^VIX",
+        "NASDAQ": "^IXIC"
+    }
+    
+    results = []
+    
+    for name, ticker in indicators.items():
+        try:
+            # מושכים 5 ימים אחרונים כדי לוודא שיש נתונים גם בסופ"ש
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="5d")
+            
+            if not hist.empty:
+                # לוקחים תמיד את השורה האחרונה - זה המחיר הכי עדכני שיש (חי או סגירה)
+                last_price = hist['Close'].iloc[-1]
+                
+                # כדי לקבוע אם החץ ירוק או אדום, נשווה ליום שלפניו
+                if len(hist) >= 2:
+                    prev_close = hist['Close'].iloc[-2]
+                    direction = "up" if last_price >= prev_close else "down"
+                else:
+                    direction = "up" # ברירת מחדל אם אין מספיק היסטוריה
+                
+                results.append((name, f"{last_price:,.2f}", direction))
+            else:
+                results.append((name, "N/A", "down"))
+        except Exception as e:
+            results.append((name, "Error", "down"))
+            
+    return results
+
+# ==========================================
+# 6. COMPONENT RENDERING
 # ==========================================
 
 def render_header_settings():
@@ -341,24 +378,24 @@ def render_header_settings():
     st.write("---")
 
 def render_top_bar():
+    # קריאה לפונקציה האמיתית החדשה
+    metrics = get_market_data_real()
+    
     col1, col2, col3, col4 = st.columns(4)
-    metrics = [
-        ("S&P 500", "5,200.50", "down"),
-        ("BITCOIN", "96,250.00", "up"),
-        ("VIX", "13.45", "down"),
-        ("NASDAQ", "17,800.20", "down"),
-    ]
     cols = [col1, col2, col3, col4]
+    
     for i, (name, val, direction) in enumerate(metrics):
         arrow = "⬇" if direction == "down" else "⬆"
         color_class = "metric-down" if direction == "down" else "metric-up"
-        with cols[i]:
-            st.markdown(f"""
-            <div class="metric-container">
-                <div class="metric-title">{name}</div>
-                <div class="metric-value">{val}</div>
-                <div class="{color_class}">{arrow}</div>
-            </div>""", unsafe_allow_html=True)
+        
+        if i < len(cols):
+            with cols[i]:
+                st.markdown(f"""
+                <div class="metric-container">
+                    <div class="metric-title">{name}</div>
+                    <div class="metric-value">{val}</div>
+                    <div class="{color_class}">{arrow}</div>
+                </div>""", unsafe_allow_html=True)
 
 def render_sticky_note(ticker, live_data, alert_row, index):
     data = live_data.get(ticker, {})
@@ -369,7 +406,6 @@ def render_sticky_note(ticker, live_data, alert_row, index):
     direction = alert_row['direction']
     notes = alert_row['notes']
     
-    # Arrow icon based on direction
     arrow_icon = "⬆" if direction == "Up" else "⬇"
 
     st.markdown(f"""
@@ -431,7 +467,7 @@ def render_sticky_note(ticker, live_data, alert_row, index):
             st.rerun()
 
 # ==========================================
-# 6. MAIN APP
+# 7. MAIN APP
 # ==========================================
 
 def main():
@@ -444,7 +480,9 @@ def main():
     
     render_header_settings()
     
+    # הבר העליון מקבל עכשיו נתונים אמיתיים
     render_top_bar()
+    
     st.markdown(
         "<div class='connection-bar'>"
         "<span class='connection-dot'></span>"
