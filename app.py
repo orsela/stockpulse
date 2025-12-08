@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from twilio.rest import Client
 import re
+import time
 
 # ==========================================
 # 0. CONFIGURATION & SECRETS
@@ -82,6 +83,8 @@ def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
+        
+        /* INPUT FIELDS */
         div[data-testid="stTextInput"] div[data-baseweb="input-container"] {
             background-color: #e0e0e0 !important;
             border: 2px solid #FFC107 !important; border-radius: 6px !important;
@@ -89,6 +92,8 @@ def apply_custom_ui():
         div[data-testid="stTextInput"] input { color: #222 !important; background-color: transparent !important; }
         div[data-testid="stTextInput"] input::placeholder { color: #666 !important; opacity: 1; }
         label[data-baseweb="label"] { color: #ffffff !important; }
+
+        /* METRICS */
         .metric-container {
             background-color: #1c1c1e; border-radius: 8px; padding: 10px;
             text-align: center; border: 1px solid #333; margin-bottom: 10px;
@@ -96,6 +101,8 @@ def apply_custom_ui():
         .metric-title { font-size: 0.8rem; color: #aaa; text-transform: uppercase; }
         .metric-value { font-size: 1.3rem; font-weight: bold; color: #fff; }
         .metric-up { color: #4CAF50; } .metric-down { color: #FF5252; }
+
+        /* STICKY NOTES */
         .sticky-note {
             background-color: #F9E79F; color: #222 !important; padding: 15px;
             border-radius: 4px; margin-bottom: 15px; border-top: 1px solid #fcf3cf;
@@ -103,6 +110,8 @@ def apply_custom_ui():
         .note-ticker { color: #000 !important; font-size: 1.4rem; font-weight: 800; }
         .note-price, .sticky-note div { color: #333 !important; }
         .target-marker { color: #d32f2f; font-weight: 700; font-size: 1.1rem; }
+        
+        /* GENERAL */
         .create-form-container {
             background-color: #1a1a1a; border: 1px solid #333;
             border-radius: 12px; padding: 20px;
@@ -117,6 +126,10 @@ def apply_custom_ui():
             display: inline-block; box-shadow: 0 0 8px #00e676; margin-right: 8px;
         }
         .connection-bar { color: #888; font-size: 0.85rem; margin-top: 5px; margin-bottom: 15px; }
+        
+        /* Auto Poll Badge */
+        .poll-badge-on { color: #00e676; font-weight: bold; font-size: 0.8rem; border: 1px solid #00e676; padding: 2px 6px; border-radius: 4px; }
+        .poll-badge-off { color: #666; font-size: 0.8rem; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -127,10 +140,15 @@ if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
 if 'user_phone' not in st.session_state:
     st.session_state.user_phone = ""
-# שמירת מזהי הודעות שטופלו כדי למנוע כפילויות
+    
+# Temporary storage for form inputs (before saving)
+if 'temp_email' not in st.session_state:
+    st.session_state.temp_email = ""
+if 'temp_phone' not in st.session_state:
+    st.session_state.temp_phone = ""
+
 if 'processed_msgs' not in st.session_state:
     st.session_state.processed_msgs = set()
-
 if 'active_alerts' not in st.session_state:
     st.session_state.active_alerts = pd.DataFrame([{
         "ticker": "NVDA", "target_price": 950.00, "current_price": 900.00,
@@ -159,72 +177,33 @@ def get_live_data(tickers):
     return live_data
 
 # ==========================================
-# 5. INCOMING WHATSAPP LOGIC
+# 5. WHATSAPP & ALERTS LOGIC
 # ==========================================
 def process_incoming_whatsapp():
-    """בודק הודעות נכנסות מ-Twilio ויוצר התראות חדשות"""
-    # אם אין הגדרות או אין מספר טלפון משתמש, אין מה לבדוק
-    if not TWILIO_SID or not TWILIO_TOKEN or not st.session_state.user_phone:
-        return
-
+    if not TWILIO_SID or not TWILIO_TOKEN or not st.session_state.user_phone: return
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
-        
-        # נירמול המספר של המשתמש לפורמט בינלאומי לחיפוש
         user_phone_clean = st.session_state.user_phone.strip()
-        if user_phone_clean.startswith("0"):
-            user_phone_clean = "+972" + user_phone_clean[1:]
+        if user_phone_clean.startswith("0"): user_phone_clean = "+972" + user_phone_clean[1:]
         
-        # משיכת 10 ההודעות האחרונות שנשלחו למספר ה-Sandbox
-        # הערה: ב-Sandbox, הודעות נכנסות מופיעות בלוגים
         messages = client.messages.list(limit=15, to=TWILIO_FROM)
-        
         for msg in messages:
-            # בדיקה 1: האם ההודעה הגיעה מהמשתמש שלנו?
-            # בדיקה 2: האם כבר טיפלנו בהודעה הזו?
             is_from_user = msg.from_ == f"whatsapp:{user_phone_clean}"
             is_new = msg.sid not in st.session_state.processed_msgs
-            
             if is_from_user and is_new:
-                body = msg.body.strip().upper() # המרת טקסט לאותיות גדולות
-                st.session_state.processed_msgs.add(msg.sid) # סימון שטופל
-                
-                # ניסיון לפענח פורמט: TICKER PRICE (למשל: TSLA 200)
-                # Regex: מילה (טיקר), רווח, מספר (מחיר)
+                body = msg.body.strip().upper()
+                st.session_state.processed_msgs.add(msg.sid)
                 match = re.match(r"^([A-Z]+)\s+(\d+(\.\d+)?)$", body)
-                
                 if match:
                     ticker = match.group(1)
                     target = float(match.group(2))
-                    
-                    # בדיקת כיוון אוטומטית (פשוטה)
-                    # נניח ברירת מחדל Up, או ננסה להביא מחיר נוכחי
-                    # לטובת המהירות נגדיר Up כברירת מחדל אם לא צוין אחרת, המשתמש יכול לערוך
-                    direction = "Up" 
-                    
-                    new_alert = {
-                        "ticker": ticker,
-                        "target_price": target,
-                        "current_price": 0.0,
-                        "direction": direction,
-                        "notes": "Added via WhatsApp",
-                        "created_at": datetime.now()
-                    }
-                    
-                    st.session_state.active_alerts = pd.concat(
-                        [st.session_state.active_alerts, pd.DataFrame([new_alert])], 
-                        ignore_index=True
-                    )
+                    new_alert = {"ticker": ticker, "target_price": target, "current_price": 0.0, "direction": "Up", "notes": "Added via WhatsApp", "created_at": datetime.now()}
+                    st.session_state.active_alerts = pd.concat([st.session_state.active_alerts, pd.DataFrame([new_alert])], ignore_index=True)
                     st.toast(f"📱 New WhatsApp Alert: {ticker} @ {target}", icon="✅")
-                
-    except Exception:
-        pass # התעלמות משגיאות חיבור זמניות כדי לא להפריע למערכת
+    except: pass
 
 def check_alerts():
-    # --- הוספת הבדיקה של ווטסאפ ---
     process_incoming_whatsapp()
-    # ------------------------------
-
     if st.session_state.active_alerts.empty: return
     tickers = st.session_state.active_alerts['ticker'].tolist()
     live_data = get_live_data(tickers)
@@ -246,9 +225,7 @@ def check_alerts():
                     ok, _ = send_whatsapp_alert(st.session_state.user_phone, tkr, cur, tgt, direct)
                     log.append(f"WA: {'✅' if ok else '❌'}")
                 if not log: log.append("Local Only")
-                
-                new = {"ticker": tkr, "target_price": tgt, "final_price": cur, "alert_time": datetime.now(), 
-                       "direction": direct, "notes": row['notes'] + f" ({' | '.join(log)})"}
+                new = {"ticker": tkr, "target_price": tgt, "final_price": cur, "alert_time": datetime.now(), "direction": direct, "notes": row['notes'] + f" ({' | '.join(log)})"}
                 st.session_state.completed_alerts = pd.concat([st.session_state.completed_alerts, pd.DataFrame([new])], ignore_index=True)
                 to_move.append(idx)
                 st.toast(f"🚀 Alert: {tkr} @ ${cur:,.2f}\n{' | '.join(log)}", icon="🔥")
@@ -274,32 +251,57 @@ def get_market_data_real():
     return res
 
 # ==========================================
-# 6. UI COMPONENTS & VALIDATION
+# 6. UI COMPONENTS
 # ==========================================
-def validate_email_callback():
-    email = st.session_state.user_email
-    if email: 
-        pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-        if not re.match(pattern, email):
-            st.toast("❌ כתובת מייל לא חוקית! הנתון נמחק.", icon="⚠️")
-            st.session_state.user_email = ""
-
-def validate_phone_callback():
-    phone = st.session_state.user_phone
-    if phone:
-        pattern = r"^05\d[-]?\d{7}$"
-        if not re.match(pattern, phone):
-            st.toast("❌ מספר טלפון לא חוקי! יש להזין נייד ישראלי (05X-XXXXXXX).", icon="⚠️")
-            st.session_state.user_phone = ""
-
 def render_header_settings():
     st.markdown("### <span style='color: #FFC107;'>Notification Settings ⚙️</span>", unsafe_allow_html=True)
-    st.caption("Define where you want to receive real-time alerts.")
-    col1, col2 = st.columns(2, gap="medium")
-    with col1:
-        st.text_input("📧 Email Destination", key="user_email", placeholder="name@company.com", on_change=validate_email_callback)
-    with col2:
-        st.text_input("📱 WhatsApp Number", key="user_phone", placeholder="050-1234567", on_change=validate_phone_callback)
+    st.caption("Define where you want to receive real-time alerts. Click 'Save' to persist.")
+    
+    # טופס שמירה - נתונים לא יאבדו ברענון
+    with st.form("settings_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.text_input("📧 Email", key="temp_email", value=st.session_state.user_email, placeholder="name@company.com")
+        with c2:
+            st.text_input("📱 WhatsApp", key="temp_phone", value=st.session_state.user_phone, placeholder="050-1234567")
+        
+        c_sub, c_clear = st.columns([1, 1])
+        with c_sub:
+            submitted = st.form_submit_button("💾 Save Settings", use_container_width=True)
+        with c_clear:
+            cleared = st.form_submit_button("🧹 Clear", use_container_width=True)
+            
+        if submitted:
+            # וולידציה בסיסית
+            if st.session_state.temp_email and not re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", st.session_state.temp_email):
+                st.error("Invalid Email!")
+            elif st.session_state.temp_phone and not re.match(r"^05\d[-]?\d{7}$", st.session_state.temp_phone):
+                st.error("Invalid Israeli Phone!")
+            else:
+                st.session_state.user_email = st.session_state.temp_email
+                st.session_state.user_phone = st.session_state.temp_phone
+                st.success("Settings Saved! Data will persist during auto-refresh.")
+        
+        if cleared:
+            st.session_state.user_email = ""
+            st.session_state.user_phone = ""
+            st.session_state.temp_email = ""
+            st.session_state.temp_phone = ""
+            st.rerun()
+
+    # אזור שליטה ברענון אוטומטי
+    st.markdown("---")
+    col_auto, col_status = st.columns([0.3, 0.7])
+    with col_auto:
+        auto_poll = st.toggle("🔄 Auto-Poll (60s)", value=False, help="Enable this to let the app receive WhatsApp messages automatically.")
+    with col_status:
+        if auto_poll:
+            st.markdown("<span class='poll-badge-on'>Listening for messages...</span>", unsafe_allow_html=True)
+            time.sleep(60) # המתנה של 60 שניות
+            st.rerun() # רענון הדף
+        else:
+            st.markdown("<span class='poll-badge-off'>Auto-poll disabled (Manual mode)</span>", unsafe_allow_html=True)
+
 
 def render_top_bar():
     metrics = get_market_data_real()
