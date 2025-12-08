@@ -360,22 +360,33 @@ def get_market_data_real():
 # ==========================================
 
 def render_header_settings():
-    st.markdown("### 📡 Alert Configuration")
-    st.markdown("Enter destination for alerts. If empty, alerts will log locally only.")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.session_state.user_email = st.text_input(
-            "📧 Email Address",
-            value=st.session_state.user_email,
-            placeholder="e.g. name@example.com",
-        )
-    with col2:
-        st.session_state.user_phone = st.text_input(
-            "📱 Mobile Phone",
-            value=st.session_state.user_phone,
-            placeholder="e.g. 050-1234567",
-        )
-    st.write("---")
+    # יצירת מסגרת מעוצבת סביב אזור ההגדרות
+    with st.container(border=True):
+        col_icon, col_title = st.columns([0.05, 0.95])
+        with col_icon:
+            st.markdown("### ⚙️")
+        with col_title:
+            st.markdown("### Notification Settings")
+            
+        st.caption("Define where you want to receive real-time alerts. Leave empty for on-screen only.")
+        
+        col1, col2 = st.columns(2, gap="medium")
+        
+        with col1:
+            st.session_state.user_email = st.text_input(
+                "📧 Email Destination",
+                value=st.session_state.user_email,
+                placeholder="name@company.com",
+                help="We will send an email when your target price is hit."
+            )
+            
+        with col2:
+            st.session_state.user_phone = st.text_input(
+                "📱 Mobile Number (Optional)",
+                value=st.session_state.user_phone,
+                placeholder="050-1234567",
+                help="Used for SMS alerts (Future feature)."
+            )
 
 def render_top_bar():
     # קריאה לפונקציה האמיתית החדשה
