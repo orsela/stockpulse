@@ -68,7 +68,7 @@ def send_email_alert(to_email, ticker, current_price, target_price, direction, n
         return False, str(e)
 
 # ==========================================
-# 3. CSS STYLING
+# 3. CSS STYLING (UPDATED FOR NEW SETTINGS DESIGN)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -79,23 +79,41 @@ def apply_custom_ui():
             color: #ffffff;
         }
         
-        /* INPUT FIELDS STYLING */
+        /* INPUT FIELDS STYLING - IMPROVED VISIBILITY */
         .stTextInput input, .stNumberInput input, .stTextArea textarea, 
         .stSelectbox div[data-baseweb="select"] {
-            background-color: #1e1e1e !important; 
+            background-color: #262730 !important; /* Lighter dark for contrast */
             color: #ffffff !important;
-            border: 1px solid #444 !important;
+            border: 1px solid #4e4e4e !important; /* Visible border */
+            border-radius: 8px !important;
         }
         
-        /* HEADER SETTINGS BAR */
-        .settings-bar {
-            background-color: #1a1a1a;
-            border-bottom: 2px solid #FFC107;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 8px;
+        /* FOCUS STATE - When user clicks the input */
+        .stTextInput input:focus {
+            border-color: #FFC107 !important;
+            box-shadow: 0 0 5px rgba(255, 193, 7, 0.5);
         }
         
+        /* SETTINGS CONTAINER - NEW STYLE */
+        .settings-container {
+            background-color: #1a1a1a; /* Dark gray background */
+            border: 2px solid #FFC107; /* Orange border matching app title */
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        .settings-title {
+            color: #FFC107 !important; /* Orange title */
+            font-size: 1.5rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+        }
+        /* ORANGE ICONS FOR EMAIL/MOBILE LABELS */
+        label[data-baseweb="input"] .st-bd {
+            color: #FFC107 !important;
+        }
+
         /* METRICS TOP BAR */
         .metric-container {
             background-color: #1c1c1e;
@@ -110,7 +128,7 @@ def apply_custom_ui():
         .metric-up { color: #4CAF50; font-size: 0.9rem; }
         .metric-down { color: #FF5252; font-size: 0.9rem; }
 
-        /* STICKY NOTES (ALERTS) */
+        /* STICKY NOTES */
         .sticky-note {
             background-color: #F9E79F;
             color: #222 !important;
@@ -121,21 +139,15 @@ def apply_custom_ui():
             position: relative;
             border-top: 1px solid #fcf3cf;
         }
-        .sticky-note h4, .sticky-note p, .sticky-note div, .sticky-note span {
-            color: #222 !important;
-        }
-        .note-header {
-            display: flex; justify-content: space-between; align-items: center;
-            border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 5px; margin-bottom: 8px;
-        }
-        .note-ticker { font-size: 1.4rem; font-weight: 800; }
+        .note-ticker { color: #000 !important; font-size: 1.4rem; font-weight: 800; }
+        .note-price, .sticky-note div { color: #333 !important; }
 
         /* TARGET MARKER */
         .target-marker {
             display: inline-flex;
             align-items: center;
             font-weight: 700;
-            color: #ff5252;
+            color: #d32f2f; /* Darker red for visibility on yellow */
             font-size: 1.1rem;
         }
         
@@ -156,44 +168,23 @@ def apply_custom_ui():
             padding-bottom: 10px;
         }
 
-        /* BUTTONS STYLING */
+        /* BUTTONS */
         div.stButton > button {
             background-color: #FFC107 !important;
             color: #000000 !important; 
             font-weight: 800 !important;
             border-radius: 8px !important;
-            border: none !important;
         }
-        div.stButton > button:hover {
-            background-color: #e0a800 !important;
-            color: #000000 !important;
-        }
-        div.stButton > button:active {
-            color: #000000 !important;
-        }
-
-        /* CONNECTION GREEN DOT */
+        
+        /* CONNECTION BAR */
         .connection-dot {
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background-color: #00e676;
-            box-shadow: 0 0 10px rgba(0, 230, 118, 0.9);
+            width: 10px; height: 10px; border-radius: 50%;
+            background-color: #00e676; display: inline-block;
+            box-shadow: 0 0 8px #00e676;
             margin-right: 8px;
-            display: inline-block;
-            animation: blink 1s infinite;
-        }
-        @keyframes blink {
-            0%, 100% { opacity: 0.2; }
-            50%      { opacity: 1;   }
         }
         .connection-bar {
-            display: flex;
-            align-items: center;
-            font-size: 0.9rem;
-            color: #bbb;
-            margin-bottom: 10px;
-            margin-top: 3px;
+            color: #888; font-size: 0.85rem; margin-top: 5px; margin-bottom: 15px;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -315,12 +306,11 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. NEW MARKET DATA FUNCTIONS
+# 5. MARKET DATA FUNCTIONS (ROBUST VERSION)
 # ==========================================
 
-@st.cache_data(ttl=300) # מרענן כל 5 דקות כדי לא להכביד
+@st.cache_data(ttl=300) 
 def get_market_data_real():
-    # הממירים (Tickers) של המדדים החשובים
     indicators = {
         "S&P 500": "^GSPC",
         "BITCOIN": "BTC-USD", 
@@ -332,25 +322,28 @@ def get_market_data_real():
     
     for name, ticker in indicators.items():
         try:
-            # מושכים 5 ימים אחרונים כדי לוודא שיש נתונים גם בסופ"ש
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="5d")
+            hist = stock.history(period="1mo")
             
             if not hist.empty:
-                # לוקחים תמיד את השורה האחרונה - זה המחיר הכי עדכני שיש (חי או סגירה)
                 last_price = hist['Close'].iloc[-1]
                 
-                # כדי לקבוע אם החץ ירוק או אדום, נשווה ליום שלפניו
                 if len(hist) >= 2:
                     prev_close = hist['Close'].iloc[-2]
                     direction = "up" if last_price >= prev_close else "down"
                 else:
-                    direction = "up" # ברירת מחדל אם אין מספיק היסטוריה
+                    direction = "up"
                 
                 results.append((name, f"{last_price:,.2f}", direction))
             else:
-                results.append((name, "N/A", "down"))
-        except Exception as e:
+                # ניסיון גיבוי נוסף אם ההיסטוריה ריקה
+                info = stock.info
+                price = info.get('regularMarketPreviousClose', info.get('previousClose', 0))
+                if price and price > 0:
+                     results.append((name, f"{price:,.2f}", "down"))
+                else:
+                     results.append((name, "Error", "down"))
+        except Exception:
             results.append((name, "Error", "down"))
             
     return results
@@ -359,37 +352,37 @@ def get_market_data_real():
 # 6. COMPONENT RENDERING
 # ==========================================
 
+# RENDER HEADER SETTINGS (NEW DESIGN)
 def render_header_settings():
     # יצירת מסגרת מעוצבת סביב אזור ההגדרות
-    with st.container(border=True):
-        col_icon, col_title = st.columns([0.05, 0.95])
-        with col_icon:
-            st.markdown("### ⚙️")
-        with col_title:
-            st.markdown("### Notification Settings")
-            
-        st.caption("Define where you want to receive real-time alerts. Leave empty for on-screen only.")
+    st.markdown('<div class="settings-container">', unsafe_allow_html=True)
+    
+    st.markdown('<div class="settings-title">Notification Settings ⚙️</div>', unsafe_allow_html=True)
+    st.caption("Define where you want to receive real-time alerts. Leave empty for on-screen only.")
+    
+    col1, col2 = st.columns(2, gap="medium")
+    
+    with col1:
+        # הטקסט של ה Label יהיה בצבע לבן, אך האיקון (המוצמד לטקסט) יהיה כתום בזכות ה CSS החדש
+        st.session_state.user_email = st.text_input(
+            "📧 Email Destination",
+            value=st.session_state.user_email,
+            placeholder="name@company.com",
+            help="We will send an email when your target price is hit."
+        )
         
-        col1, col2 = st.columns(2, gap="medium")
-        
-        with col1:
-            st.session_state.user_email = st.text_input(
-                "📧 Email Destination",
-                value=st.session_state.user_email,
-                placeholder="name@company.com",
-                help="We will send an email when your target price is hit."
-            )
-            
-        with col2:
-            st.session_state.user_phone = st.text_input(
-                "📱 Mobile Number (Optional)",
-                value=st.session_state.user_phone,
-                placeholder="050-1234567",
-                help="Used for SMS alerts (Future feature)."
-            )
+    with col2:
+        st.session_state.user_phone = st.text_input(
+            "📱 Mobile Number (Optional)",
+            value=st.session_state.user_phone,
+            placeholder="050-1234567",
+            help="Used for SMS alerts (Future feature)."
+        )
+    
+    st.markdown('</div>', unsafe_allow_html=True) # סגירת ה div של ה settings-container
+
 
 def render_top_bar():
-    # קריאה לפונקציה האמיתית החדשה
     metrics = get_market_data_real()
     
     col1, col2, col3, col4 = st.columns(4)
@@ -491,7 +484,6 @@ def main():
     
     render_header_settings()
     
-    # הבר העליון מקבל עכשיו נתונים אמיתיים
     render_top_bar()
     
     st.markdown(
