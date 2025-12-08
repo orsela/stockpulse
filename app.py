@@ -1,8 +1,197 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import yfinance as yf
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from twilio.rest import Client
+import re
+import time
+
 # ==========================================
-# 5. WHATSAPP LOGIC (SUPER DEBUG VERSION)
+# 0. CONFIGURATION & SECRETS
+# ==========================================
+try:
+    SENDER_EMAIL = st.secrets.get("SENDER_EMAIL", "")
+    SENDER_PASSWORD = st.secrets.get("SENDER_PASSWORD", "")
+    TWILIO_SID = st.secrets.get("TWILIO_ACCOUNT_SID", "")
+    TWILIO_TOKEN = st.secrets.get("TWILIO_AUTH_TOKEN", "")
+    TWILIO_FROM = st.secrets.get("TWILIO_PHONE_NUMBER", "")
+except Exception:
+    SENDER_EMAIL = ""
+    SENDER_PASSWORD = ""
+    TWILIO_SID = ""
+    TWILIO_TOKEN = ""
+    TWILIO_FROM = ""
+
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+
+# ==========================================
+# 1. PAGE SETUP
+# ==========================================
+st.set_page_config(
+    page_title="StockPulse Terminal",
+    layout="wide",
+    page_icon="💹",
+    initial_sidebar_state="collapsed"
+)
+
+# ==========================================
+# 2. NOTIFICATION FUNCTIONS
+# ==========================================
+def send_email_alert(to_email, ticker, current_price, target_price, direction, notes):
+    if not SENDER_EMAIL or not SENDER_PASSWORD:
+        return False, "Secrets missing"
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = f"🚀 StockPulse Alert: {ticker} hit ${current_price:,.2f}"
+        body = f"""<html><body><h2>Stock Alert Triggered!</h2><p><strong>Ticker:</strong> {ticker}</p><p><strong>Trigger Price:</strong> ${current_price:,.2f}</p><p><strong>Target Was:</strong> ${target_price:,.2f} ({direction})</p><p><strong>Notes:</strong> {notes}</p><br><p>Sent from StockPulse Terminal</p></body></html>"""
+        msg.attach(MIMEText(body, 'html'))
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        text = msg.as_string()
+        server.sendmail(SENDER_EMAIL, to_email, text)
+        server.quit()
+        return True, "Email Sent"
+    except Exception as e:
+        return False, str(e)
+
+def send_whatsapp_alert(to_number, ticker, current_price, target_price, direction):
+    if not TWILIO_SID or not TWILIO_TOKEN or not TWILIO_FROM:
+        return False, "Twilio secrets missing"
+    
+    # ניקוי מספר: משאיר רק ספרות
+    clean_digits = re.sub(r'\D', '', str(to_number))
+    # המרה לפורמט בינלאומי אם מתחיל ב-0
+    if clean_digits.startswith("0"):
+        clean_digits = "972" + clean_digits[1:]
+        
+    to_whatsapp = f"whatsapp:+{clean_digits}"
+    
+    msg_body = f"🚀 *StockPulse Alert* 🚀\n\n📊 *{ticker}* hit *${current_price:,.2f}*\n🎯 Target: ${target_price:,.2f} ({direction})\n⏱️ Time: {datetime.now().strftime('%H:%M')}"
+    try:
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        client.messages.create(from_=TWILIO_FROM, body=msg_body, to=to_whatsapp)
+        return True, "WhatsApp Sent"
+    except Exception as e:
+        return False, f"WA Error: {str(e)}"
+
+# ==========================================
+# 3. CSS STYLING
+# ==========================================
+def apply_custom_ui():
+    st.markdown("""
+    <style>
+        .stApp { background-color: #0e0e0e !important; color: #ffffff; }
+        
+        /* INPUT FIELDS */
+        div[data-testid="stTextInput"] div[data-baseweb="input-container"] {
+            background-color: #e0e0e0 !important;
+            border: 2px solid #FFC107 !important; border-radius: 6px !important;
+        }
+        div[data-testid="stTextInput"] input { color: #222 !important; background-color: transparent !important; }
+        div[data-testid="stTextInput"] input::placeholder { color: #666 !important; opacity: 1; }
+        label[data-baseweb="label"] { color: #ffffff !important; }
+
+        /* METRICS */
+        .metric-container {
+            background-color: #1c1c1e; border-radius: 8px; padding: 10px;
+            text-align: center; border: 1px solid #333; margin-bottom: 10px;
+        }
+        .metric-title { font-size: 0.8rem; color: #aaa; text-transform: uppercase; }
+        .metric-value { font-size: 1.3rem; font-weight: bold; color: #fff; }
+        .metric-up { color: #4CAF50; } .metric-down { color: #FF5252; }
+
+        /* STICKY NOTES */
+        .sticky-note {
+            background-color: #F9E79F; color: #222 !important; padding: 15px;
+            border-radius: 4px; margin-bottom: 15px; border-top: 1px solid #fcf3cf;
+        }
+        .note-ticker { color: #000 !important; font-size: 1.4rem; font-weight: 800; }
+        .note-price, .sticky-note div { color: #333 !important; }
+        .target-marker { color: #d32f2f; font-weight: 700; font-size: 1.1rem; }
+        
+        /* GENERAL */
+        .create-form-container {
+            background-color: #1a1a1a; border: 1px solid #333;
+            border-radius: 12px; padding: 20px;
+        }
+        .form-header { color: #FFC107; font-size: 1.5rem; font-weight: bold; margin-bottom: 15px; }
+        div.stButton > button {
+            background-color: #FFC107 !important; color: #000000 !important; 
+            font-weight: 800 !important; border-radius: 8px !important;
+        }
+        .connection-dot {
+            width: 10px; height: 10px; border-radius: 50%; background-color: #00e676;
+            display: inline-block; box-shadow: 0 0 8px #00e676; margin-right: 8px;
+        }
+        .connection-bar { color: #888; font-size: 0.85rem; margin-top: 5px; margin-bottom: 15px; }
+        
+        /* Auto Poll Badge */
+        .poll-badge-on { color: #00e676; font-weight: bold; font-size: 0.8rem; border: 1px solid #00e676; padding: 2px 6px; border-radius: 4px; }
+        .poll-badge-off { color: #666; font-size: 0.8rem; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ==========================================
+# 4. STATE MANAGEMENT
+# ==========================================
+if 'user_email' not in st.session_state:
+    st.session_state.user_email = ""
+if 'user_phone' not in st.session_state:
+    st.session_state.user_phone = ""
+    
+if 'temp_email' not in st.session_state:
+    st.session_state.temp_email = ""
+if 'temp_phone' not in st.session_state:
+    st.session_state.temp_phone = ""
+
+if 'processed_msgs' not in st.session_state:
+    st.session_state.processed_msgs = set()
+if 'active_alerts' not in st.session_state:
+    st.session_state.active_alerts = pd.DataFrame([{
+        "ticker": "NVDA", "target_price": 950.00, "current_price": 900.00,
+        "direction": "Up", "notes": "Strong earnings expected", "created_at": datetime.now()
+    }])
+if 'completed_alerts' not in st.session_state:
+    st.session_state.completed_alerts = pd.DataFrame(columns=["ticker", "target_price", "final_price", "alert_time", "direction", "notes"])
+
+# קובע אם להציג מידע דיבאג
+if 'show_debug' not in st.session_state:
+    st.session_state.show_debug = False
+
+if 'debug_info' not in st.session_state:
+    st.session_state.debug_info = {}
+
+REFRESH_RATE = 60
+
+@st.cache_data(ttl=REFRESH_RATE)
+def get_live_data(tickers):
+    if not tickers: return {}
+    live_data = {}
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            curr = info.get('regularMarketPrice', info.get('currentPrice', None))
+            prev = info.get('previousClose', None)
+            price = curr if curr not in (None, "N/A") else prev
+            ma150 = info.get('twoHundredDayAverage', info.get('fiftyDayAverage', 0))
+            live_data[ticker] = {"price": price if price else 0.0, "MA150": ma150 if ma150 else 0.0}
+        except:
+            live_data[ticker] = {"price": 0.0, "MA150": 0.0}
+    return live_data
+
+# ==========================================
+# 5. WHATSAPP LOGIC (FULL DEBUG VERSION)
 # ==========================================
 def process_incoming_whatsapp():
-    # בדיקה שיש קרדנשלס
+    # בדיקה שיש הגדרות טוויליו
     if not TWILIO_SID or not TWILIO_TOKEN: 
         if st.session_state.show_debug:
             st.session_state.debug_info = {"error": "Twilio Secrets Missing!"}
@@ -12,35 +201,37 @@ def process_incoming_whatsapp():
         client = Client(TWILIO_SID, TWILIO_TOKEN)
         
         # 1. הכנת המספר הצפוי של המשתמש (לצורך השוואה)
-        raw_phone = str(st.session_state.user_phone)
-        digits_only = re.sub(r'\D', '', raw_phone) 
-        if digits_only.startswith("0"):
-            digits_only = "972" + digits_only[1:]
-        expected_sender = f"whatsapp:+{digits_only}"
+        user_phone_clean = ""
+        expected_sender = ""
+        if st.session_state.user_phone:
+            raw_phone = str(st.session_state.user_phone)
+            digits_only = re.sub(r'\D', '', raw_phone) 
+            if digits_only.startswith("0"):
+                digits_only = "972" + digits_only[1:]
+            expected_sender = f"whatsapp:+{digits_only}"
         
-        # 2. אתחול דיבאג
+        # 2. אתחול מידע לדיבאג
         st.session_state.debug_info = {
             "my_number_formatted": expected_sender,
-            "twilio_configured_number": TWILIO_FROM, # נראה מה מוגדר בסודות
+            "twilio_configured_number": TWILIO_FROM, # זה המספר שמוגדר ב-Secrets של המערכת
             "messages_found": []
         }
         
-        # 3. משיכת כל ההודעות האחרונות (בלי פילטר 'to' כדי לראות הכל)
-        # זה יעזור לנו להבין אם המספר ב-Secrets לא תואם
-        messages = client.messages.list(limit=15)
+        # 3. משיכת כל ההודעות האחרונות (ללא פילטר כדי לראות מה מתקבל באמת)
+        messages = client.messages.list(limit=20)
         
         for msg in messages:
-            # נשמור מידע לדיבאג
+            # הוספת כל הודעה שנמצאה ללוג הדיבאג
             st.session_state.debug_info["messages_found"].append({
                 "direction": msg.direction, # inbound / outbound
                 "from": msg.from_,
                 "to": msg.to,
                 "body": msg.body,
-                "status": msg.status,
-                "sid": msg.sid
+                "sid": msg.sid,
+                "date": str(msg.date_created)
             })
             
-            # לוגיקה: אנחנו מחפשים הודעה שנכנסה (inbound) והגיעה מהמשתמש שלנו
+            # לוגיקה: האם זו הודעה נכנסת (inbound) והאם היא מהמשתמש שלנו?
             is_inbound = (msg.direction == 'inbound')
             is_from_user = (msg.from_ == expected_sender)
             is_new = (msg.sid not in st.session_state.processed_msgs)
@@ -67,4 +258,21 @@ def process_incoming_whatsapp():
                     st.toast(f"📱 WhatsApp: Added {ticker} @ {target}", icon="✅")
                     
     except Exception as e:
-        st.session_state.debug_error = str(e)
+        st.session_state.debug_info["error"] = str(e)
+
+def check_alerts():
+    # קריאה לפונקציית העיבוד לפני בדיקת המחירים
+    process_incoming_whatsapp()
+    
+    if st.session_state.active_alerts.empty: return
+    tickers = st.session_state.active_alerts['ticker'].tolist()
+    live_data = get_live_data(tickers)
+    to_move = []
+    for idx, row in st.session_state.active_alerts.iterrows():
+        tkr = row['ticker']
+        tgt = row['target_price']
+        direct = row['direction']
+        if tkr in live_data and live_data[tkr]['price'] != 0.0:
+            cur = live_data[tkr]['price']
+            st.session_state.active_alerts.loc[idx, 'current_price'] = cur
+            trig = (direct == "Up"
