@@ -8,4 +8,10 @@ streamlit
 pandas
 yfinance
 twilio
+streamlit
+pandas
+yfinance
+twilio
+gspread
+oauth2client
 
