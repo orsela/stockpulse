@@ -267,4 +267,327 @@ def check_alerts():
                 # --- SEND REAL EMAIL ---
                 email_status = "Skipped"
                 if current_email:
-                    success, msg = send_email
+                    success, msg = send_email_alert(
+                        current_email, ticker, current, target, direction, row['notes']
+                    )
+                    email_status = "Sent" if success else f"Failed ({msg})"
+                else:
+                    email_status = "No Email Provided"
+
+                new_completed = {
+                    "ticker": ticker,
+                    "target_price": target,
+                    "final_price": current,
+                    "alert_time": datetime.now(),
+                    "direction": direction,
+                    "notes": row['notes'] 
+                             + f" (Email Status: {email_status})",
+                }
+                st.session_state.completed_alerts = pd.concat(
+                    [st.session_state.completed_alerts, 
+                     pd.DataFrame([new_completed])], 
+                    ignore_index=True,
+                )
+                alerts_to_move.append(index)
+                
+                st.toast(
+                    f"🚀 Alert Sent! {ticker} @ ${current:,.2f}\n"
+                    f"Email: {email_status}",
+                    icon="📨",
+                )
+
+    if alerts_to_move:
+        st.session_state.active_alerts.drop(alerts_to_move, inplace=True)
+        st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+        st.rerun()
+
+# ==========================================
+# 5. MARKET DATA FUNCTIONS (ROBUST VERSION)
+# ==========================================
+
+@st.cache_data(ttl=300) 
+def get_market_data_real():
+    indicators = {
+        "S&P 500": "^GSPC",
+        "BITCOIN": "BTC-USD", 
+        "VIX": "^VIX",
+        "NASDAQ": "^IXIC"
+    }
+    
+    results = []
+    
+    for name, ticker in indicators.items():
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="1mo")
+            
+            if not hist.empty:
+                last_price = hist['Close'].iloc[-1]
+                
+                if len(hist) >= 2:
+                    prev_close = hist['Close'].iloc[-2]
+                    direction = "up" if last_price >= prev_close else "down"
+                else:
+                    direction = "up"
+                
+                results.append((name, f"{last_price:,.2f}", direction))
+            else:
+                # ניסיון גיבוי נוסף אם ההיסטוריה ריקה
+                info = stock.info
+                price = info.get('regularMarketPreviousClose', info.get('previousClose', 0))
+                if price and price > 0:
+                     results.append((name, f"{price:,.2f}", "down"))
+                else:
+                     results.append((name, "Error", "down"))
+        except Exception:
+            results.append((name, "Error", "down"))
+            
+    return results
+
+# ==========================================
+# 6. COMPONENT RENDERING
+# ==========================================
+
+# RENDER HEADER SETTINGS (CLEAN DESIGN WITHOUT OUTER BOX)
+def render_header_settings():
+    # כותרת כתומה וגדולה עם אייקון
+    st.markdown("### <span style='color: #FFC107;'>Notification Settings ⚙️</span>", unsafe_allow_html=True)
+    # כיתוב הסבר לבן מתחת
+    st.caption("Define where you want to receive real-time alerts. Leave empty for on-screen only.")
+    
+    col1, col2 = st.columns(2, gap="medium")
+    
+    with col1:
+        st.session_state.user_email = st.text_input(
+            "📧 Email Destination",
+            value=st.session_state.user_email,
+            placeholder="name@company.com",
+            help="We will send an email when your target price is hit."
+        )
+        
+    with col2:
+        st.session_state.user_phone = st.text_input(
+            "📱 Mobile Number (Optional)",
+            value=st.session_state.user_phone,
+            placeholder="050-1234567",
+            help="Used for SMS alerts (Future feature)."
+        )
+    # הוסר ה-div החיצוני שסגר את המסגרת
+
+def render_top_bar():
+    metrics = get_market_data_real()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    cols = [col1, col2, col3, col4]
+    
+    for i, (name, val, direction) in enumerate(metrics):
+        arrow = "⬇" if direction == "down" else "⬆"
+        color_class = "metric-down" if direction == "down" else "metric-up"
+        
+        if i < len(cols):
+            with cols[i]:
+                st.markdown(f"""
+                <div class="metric-container">
+                    <div class="metric-title">{name}</div>
+                    <div class="metric-value">{val}</div>
+                    <div class="{color_class}">{arrow}</div>
+                </div>""", unsafe_allow_html=True)
+
+def render_sticky_note(ticker, live_data, alert_row, index):
+    data = live_data.get(ticker, {})
+    price = data.get('price', 0.0) or 0.0
+    ma150 = data.get('MA150', 0.0) or 0.0
+
+    target = alert_row['target_price']
+    direction = alert_row['direction']
+    notes = alert_row['notes']
+    
+    arrow_icon = "⬆" if direction == "Up" else "⬇"
+
+    st.markdown(f"""
+    <div class="sticky-note">
+        <div class="note-header">
+            <div class="note-ticker">{ticker}</div>
+            <div class="note-target target-marker">
+                {arrow_icon} 🎯 ${target:,.2f}
+            </div>
+        </div>
+        <div class="note-price">Current: ${price:,.2f}</div>
+        <div style="font-size: 0.9em; margin-top:5px;">
+            MA150: ${ma150:,.2f} | Dir: {direction}
+        </div>
+        <div style="margin-top: 10px; font-style: italic; 
+                    background: rgba(255,255,255,0.3); 
+                    padding: 5px; border-radius: 4px;">
+            "{notes}"
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
+    
+    # EDIT
+    with c1:
+        with st.popover("✏️ Edit", use_container_width=True):
+            st.markdown("**Update Alert Details**")
+            
+            ed_ticker = st.text_input(
+                "Ticker", value=ticker, key=f"ed_tick_{index}"
+            )
+            ed_price = st.number_input(
+                "Target Price", value=float(target), 
+                format="%.2f", key=f"ed_price_{index}",
+            )
+            ed_dir = st.selectbox(
+                "Direction", ["Up", "Down"], 
+                index=0 if direction == "Up" else 1,
+                key=f"ed_dir_{index}",
+            )
+            ed_notes = st.text_area(
+                "Notes", value=notes, height=80, key=f"ed_note_{index}"
+            )
+            
+            if st.button("💾 Save Changes", key=f"btn_save_{index}"):
+                st.session_state.active_alerts.at[index, 'ticker'] = ed_ticker.upper()
+                st.session_state.active_alerts.at[index, 'target_price'] = ed_price
+                st.session_state.active_alerts.at[index, 'direction'] = ed_dir
+                st.session_state.active_alerts.at[index, 'notes'] = ed_notes
+                st.success("Updated!")
+                st.rerun()
+
+    # DELETE
+    with c2:
+        if st.button("🗑️ Del", key=f"del_{index}", use_container_width=True):
+            st.session_state.active_alerts.drop(index, inplace=True)
+            st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+            st.rerun()
+
+# ==========================================
+# 7. MAIN APP
+# ==========================================
+
+def main():
+    apply_custom_ui()
+    
+    st.markdown(
+        "<h1 style='text-align: center; color: #FFC107;'>⚡ StockPulse Terminal</h1>", 
+        unsafe_allow_html=True,
+    )
+    
+    render_header_settings()
+    
+    render_top_bar()
+    
+    st.markdown(
+        "<div class='connection-bar'>"
+        "<span class='connection-dot'></span>"
+        "<span>Connected to price server</span>"
+        "</div>", 
+        unsafe_allow_html=True,
+    )
+    check_alerts()
+    
+    st.write("---")
+    
+    col_alerts, col_create = st.columns([1.2, 1], gap="large")
+    
+    with col_alerts:
+        st.markdown("### 🔔 Active Alerts")
+        if not st.session_state.active_alerts.empty:
+            tickers = st.session_state.active_alerts['ticker'].tolist()
+            live_data = get_live_data(tickers)
+            
+            note_cols = st.columns(2)
+            for i, row in st.session_state.active_alerts.iterrows():
+                with note_cols[i % 2]:
+                    render_sticky_note(row['ticker'], live_data, row, i)
+        else:
+            st.info("No active alerts.")
+
+    with col_create:
+        st.markdown('<div class="create-form-container">', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="form-header">➕ Create New Alert</div>', 
+            unsafe_allow_html=True,
+        )
+        
+        with st.form("create_alert_form", clear_on_submit=True):
+            st.markdown("**Ticker Symbol**")
+            st.text_input(
+                "Ticker Symbol", 
+                placeholder="e.g. NVDA",
+                key="new_ticker",
+                label_visibility="collapsed",
+            )
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Target Price ($)**")
+                st.session_state.new_target = st.slider(
+                    "Target", 
+                    min_value=0.0, 
+                    max_value=2000.0, 
+                    value=200.0, 
+                    step=1.0,
+                    key="new_target_slider",
+                    label_visibility="collapsed",
+                )
+            with c2:
+                st.markdown("**Direction**")
+                st.selectbox(
+                    "Direction", 
+                    ["Up", "Down"], 
+                    key="new_direction",
+                    label_visibility="collapsed",
+                )
+                
+            st.markdown("**Notes / Strategy**")
+            st.text_area(
+                "Notes", 
+                placeholder="Strategy details...",
+                height=100,
+                key="new_notes",
+                label_visibility="collapsed",
+            )
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            submitted = st.form_submit_button(
+                "ADD NOTIFICATION ➔", use_container_width=True
+            )
+            
+            if submitted:
+                ticker_in = st.session_state.new_ticker.upper()
+                target_in = st.session_state.new_target
+                
+                if ticker_in and target_in > 0:
+                    new_alert = {
+                        "ticker": ticker_in,
+                        "target_price": target_in,
+                        "current_price": 0.0,
+                        "direction": st.session_state.new_direction,
+                        "notes": (
+                            st.session_state.new_notes 
+                            if st.session_state.new_notes 
+                            else "No notes"
+                        ),
+                        "created_at": datetime.now(),
+                    }
+                    st.session_state.active_alerts = pd.concat(
+                        [st.session_state.active_alerts, 
+                         pd.DataFrame([new_alert])], 
+                        ignore_index=True,
+                    )
+                    st.success(f"Alert for {ticker_in} added!")
+                    st.rerun()
+                else:
+                    st.error("Please enter Ticker and Target.")
+                    
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    st.write("---")
+    with st.expander("📂 View History"):
+        st.dataframe(st.session_state.completed_alerts, use_container_width=True)
+
+if __name__ == "__main__":
+    main()
