@@ -30,21 +30,28 @@ except Exception:
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SHEET_NAME = "StockPulse_DB" # השם של הגיליון שיצרת בגוגל
+
+# ---------------------------------------------------------
+# הקישור לגיליון שלך
+# ---------------------------------------------------------
+SHEET_URL = "https://docs.google.com/spreadsheets/d/18GROVu8c2Hx5n4H2FiZrOeLXgH9xJG0miPqfgdb-V9w/edit?usp=sharing"
+
 
 # ==========================================
 # 1. DATABASE FUNCTIONS (GOOGLE SHEETS)
 # ==========================================
 def get_db_connection():
-    """יוצר חיבור לגיליון גוגל"""
+    """יוצר חיבור לגיליון גוגל באמצעות URL"""
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(GCP_SECRETS, scope)
-    client = gspread.authorize(creds)
     try:
-        sheet = client.open(SHEET_NAME).sheet1
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(GCP_SECRETS, scope)
+        client = gspread.authorize(creds)
+        # שינוי קריטי: פתיחה לפי URL במקום לפי שם
+        sheet = client.open_by_url(SHEET_URL).sheet1
         return sheet
     except Exception as e:
-        st.error(f"Could not open Google Sheet '{SHEET_NAME}'. Check permissions.")
+        # הצגת השגיאה האמיתית כדי שנבין מה קורה אם זה נכשל
+        st.error(f"Database Connection Error: {e}")
         return None
 
 def load_data_from_db():
@@ -55,26 +62,30 @@ def load_data_from_db():
     try:
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
-        # אם הגיליון ריק, נחזיר דאטה-פריים ריק עם עמודות
         if df.empty:
             return pd.DataFrame(columns=["ticker", "target_price", "current_price", "direction", "notes", "created_at", "status"])
+        
+        # וידוא שכל העמודות קיימות (למניעת קריסה אם הגיליון חדש)
+        expected_cols = ["ticker", "target_price", "current_price", "direction", "notes", "created_at", "status"]
+        for col in expected_cols:
+            if col not in df.columns:
+                df[col] = ""
         return df
     except Exception:
         return pd.DataFrame(columns=["ticker", "target_price", "current_price", "direction", "notes", "created_at", "status"])
 
 def sync_db(df):
-    """שומר את הטבלה המעודכנת לגיליון (מוחק וכותב מחדש)"""
+    """שומר את הטבלה המעודכנת לגיליון"""
     sheet = get_db_connection()
     if not sheet: return
     
-    # המרת תאריכים למחרוזות (JSON לא תומך ב-datetime)
     df_save = df.copy()
-    if 'created_at' in df_save.columns:
-        df_save['created_at'] = df_save['created_at'].astype(str)
+    # המרת כל הנתונים ל-String כדי למנוע בעיות תאריך ב-JSON
+    df_save = df_save.astype(str)
         
     try:
-        sheet.clear() # ניקוי הגיליון
-        # כתיבת כותרות + נתונים
+        sheet.clear()
+        # עדכון כותרות + שורות
         sheet.update([df_save.columns.values.tolist()] + df_save.values.tolist())
     except Exception as e:
         st.error(f"Error saving to DB: {e}")
@@ -166,7 +177,7 @@ if 'active_alerts' not in st.session_state:
     with st.spinner('Connecting to Database...'):
         st.session_state.active_alerts = load_data_from_db()
 
-# סינון להצגת התראות פעילות בלבד בלוח (סטטוס = Active או ריק)
+# סינון להצגת התראות פעילות בלבד בלוח
 if not st.session_state.active_alerts.empty:
     if 'status' not in st.session_state.active_alerts.columns:
          st.session_state.active_alerts['status'] = 'Active'
@@ -225,35 +236,38 @@ def process_incoming_whatsapp():
                     st.toast(f"📱 WhatsApp: Added {ticker} @ {target}", icon="✅")
         
         if changes:
-            sync_db(st.session_state.active_alerts) # שמירה ל-DB
+            sync_db(st.session_state.active_alerts)
             
     except Exception: pass
 
 def check_alerts():
     process_incoming_whatsapp()
     
-    # עבודה רק על התראות פעילות
     if st.session_state.active_alerts.empty: return
     
-    # סינון: רק שורות שהסטטוס שלהן לא 'Completed'
-    active_mask = st.session_state.active_alerts['status'] != 'Completed'
-    if not active_mask.any(): return
-    
-    active_df = st.session_state.active_alerts[active_mask]
+    # עבודה רק על Active
+    if 'status' in st.session_state.active_alerts.columns:
+        active_mask = st.session_state.active_alerts['status'] != 'Completed'
+        if not active_mask.any(): return
+        active_df = st.session_state.active_alerts[active_mask]
+    else:
+        active_df = st.session_state.active_alerts
+
     tickers = active_df['ticker'].unique().tolist()
     live_data = get_live_data(tickers)
-    
     changes_made = False
     
     for idx, row in active_df.iterrows():
-        tkr = row['ticker']
-        tgt = row['target_price']
-        direct = row['direction']
+        tkr = row['ticker']; tgt = float(row['target_price']); direct = row['direction']
         
         if tkr in live_data and live_data[tkr]['price'] != 0.0:
             cur = live_data[tkr]['price']
-            # עדכון מחיר בטבלה הראשית (בזיכרון)
-            st.session_state.active_alerts.at[idx, 'current_price'] = cur
+            # מציאת האינדקס האמיתי ב-DataFrame המקורי
+            original_idx = st.session_state.active_alerts.index[st.session_state.active_alerts['created_at'] == row['created_at']].tolist()
+            if not original_idx: continue
+            real_idx = original_idx[0]
+
+            st.session_state.active_alerts.at[real_idx, 'current_price'] = cur
             
             trig = (direct == "Up" and cur >= tgt) or (direct == "Down" and cur <= tgt)
             if trig:
@@ -266,30 +280,17 @@ def check_alerts():
                     log.append(f"WA: {'✅' if ok else '❌'}")
                 if not log: log.append("Local Only")
                 
-                # העברה להיסטוריה
                 new_hist = {"ticker": tkr, "target_price": tgt, "final_price": cur, "alert_time": str(datetime.now()), "direction": direct, "notes": row['notes'] + f" ({' | '.join(log)})"}
                 st.session_state.completed_alerts = pd.concat([st.session_state.completed_alerts, pd.DataFrame([new_hist])], ignore_index=True)
                 
-                # סימון כהושלם בטבלה הראשית (במקום מחיקה, כדי לשמור ב-DB אם רוצים)
-                # במקרה שלנו, נמחק מהתצוגה הפעילה
-                st.session_state.active_alerts.at[idx, 'status'] = 'Completed'
+                st.session_state.active_alerts.at[real_idx, 'status'] = 'Completed'
                 changes_made = True
-                
                 st.toast(f"🚀 Alert: {tkr} @ ${cur:,.2f}\n{' | '.join(log)}", icon="🔥")
 
     if changes_made:
-        # שמירת השינויים (כולל סטטוס Completed) לגיליון
-        # ננקה מהזיכרון התראות שהושלמו כדי שלא יכבידו על התצוגה, אך ב-DB הן יישארו? 
-        # לטובת הפשטות: אנחנו מוחקים מהזיכרון ומה-DB שורות שהושלמו (כמו בקוד המקורי),
-        # ושומרים אותן רק בטבלה המקומית של ההיסטוריה (completed_alerts).
-        
-        # 1. שמירת ההיסטוריה (אופציונלי: אפשר לשמור לגיליון נפרד, כרגע זה מקומי)
-        
-        # 2. מחיקת Completed מה-Active Alerts
+        # ניקוי הזיכרון מהתראות שהושלמו
         st.session_state.active_alerts = st.session_state.active_alerts[st.session_state.active_alerts['status'] != 'Completed']
         st.session_state.active_alerts.reset_index(drop=True, inplace=True)
-        
-        # 3. סנכרון ל-Google Sheets
         sync_db(st.session_state.active_alerts)
         st.rerun()
 
@@ -365,13 +366,13 @@ def render_sticky_note(ticker, live_data, alert_row, index):
                 st.session_state.active_alerts.at[index, 'target_price'] = ed_p
                 st.session_state.active_alerts.at[index, 'direction'] = ed_d
                 st.session_state.active_alerts.at[index, 'notes'] = ed_n
-                sync_db(st.session_state.active_alerts) # Sync on Edit
+                sync_db(st.session_state.active_alerts) 
                 st.rerun()
     with c2:
         if st.button("🗑️ Del", key=f"del_{index}", use_container_width=True):
             st.session_state.active_alerts.drop(index, inplace=True)
             st.session_state.active_alerts.reset_index(drop=True, inplace=True)
-            sync_db(st.session_state.active_alerts) # Sync on Delete
+            sync_db(st.session_state.active_alerts)
             st.rerun()
 
 # ==========================================
@@ -410,7 +411,7 @@ def main():
                 if t_in and p_in > 0:
                     new = {"ticker": t_in, "target_price": p_in, "current_price": 0.0, "direction": d_in, "notes": n_in or "No notes", "created_at": str(datetime.now()), "status": "Active"}
                     st.session_state.active_alerts = pd.concat([st.session_state.active_alerts, pd.DataFrame([new])], ignore_index=True)
-                    sync_db(st.session_state.active_alerts) # Sync on Add
+                    sync_db(st.session_state.active_alerts) 
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     st.write("---")
