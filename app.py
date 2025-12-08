@@ -69,23 +69,25 @@ def sync_db(df):
         st.error(f"Error saving to DB: {e}")
 
 # ==========================================
-# 2. ANALYSIS FUNCTIONS (NEW)
+# 2. ANALYSIS FUNCTIONS (UPDATED RULES)
 # ==========================================
 def calculate_smart_sl(ticker, buy_price):
-    """מחשב סטופ-לוס חכם על בסיס ATR וממוצע 150"""
+    """
+    מחשב סטופ-לוס חכם עם החוקים החדשים:
+    1. בסיס: ATR X 2
+    2. חוק 1: מקסימום הפסד 12%
+    3. חוק 2: לא יורד מתחת ל-MA150 (אם המחיר כרגע מעליו)
+    """
     try:
         stock = yf.Ticker(ticker)
-        # מושכים שנה אחורה כדי שיהיה מספיק לממוצע 150
         hist = stock.history(period="1y")
         
         if len(hist) < 150:
             return None, "Not enough data for MA150"
             
-        # 1. חישוב MA150
+        # חישוב אינדיקטורים
         hist['MA150'] = hist['Close'].rolling(window=150).mean()
         
-        # 2. חישוב ATR (14 יום)
-        # True Range = Max(High-Low, Abs(High-PrevClose), Abs(Low-PrevClose))
         high_low = hist['High'] - hist['Low']
         high_close = (hist['High'] - hist['Close'].shift()).abs()
         low_close = (hist['Low'] - hist['Close'].shift()).abs()
@@ -93,42 +95,67 @@ def calculate_smart_sl(ticker, buy_price):
         hist['ATR'] = tr.rolling(window=14).mean()
         
         latest = hist.iloc[-1]
-        
         ma150 = latest['MA150']
         atr = latest['ATR']
-        current_market_price = latest['Close']
+        curr_price = latest['Close']
         
-        # 3. זיהוי מגמה
-        trend = "UP 🟢" if current_market_price > ma150 else "DOWN 🔴"
+        # מחיר כניסה (אם המשתמש לא הזין, לוקחים מחיר נוכחי)
+        entry = buy_price if buy_price > 0 else curr_price
         
-        # 4. המלצת סטופ לוס (2 ATR מתחת למחיר הקנייה)
-        # אם מחיר הקנייה לא סופק, נשתמש במחיר הנוכחי
-        base_price = buy_price if buy_price > 0 else current_market_price
-        recommended_sl = base_price - (2 * atr)
+        # --- לוגיקת החוקים ---
+        
+        # 1. חישוב בסיסי (ATR)
+        sl_atr = entry - (2 * atr)
+        final_sl = sl_atr
+        reason = "Volatility (2x ATR)"
+        
+        # 2. חוק מקסימום הפסד 12% (רצפה קשיחה)
+        # הסטופ לא יכול להיות נמוך מ-88% ממחיר הכניסה
+        sl_max_loss = entry * 0.88
+        if final_sl < sl_max_loss:
+            final_sl = sl_max_loss
+            reason = "Max Loss Limit (12%)"
+            
+        # 3. חוק MA150 (תמיכה טכנית)
+        # מופעל רק אם המניה כרגע נמצאת מעל הממוצע (מגמת עלייה)
+        if curr_price > ma150:
+            # הסטופ לא יכול להיות מתחת ל-MA150
+            if final_sl < ma150:
+                final_sl = ma150
+                reason = "MA150 Support Rule"
+        
+        # הגנה: אם הסטופ המחושב גבוה מהמחיר הנוכחי (למשל מניה קרסה מתחת לממוצע), נתריע
+        is_below_sl = False
+        if final_sl >= curr_price:
+            final_sl = curr_price * 0.99 # נותן סטופ קצת מתחת למחיר הנוכחי ליציאה מיידית
+            reason = "Immediate Exit (Price violated rules)"
+            is_below_sl = True
+
+        trend = "UP 🟢" if curr_price > ma150 else "DOWN 🔴"
         
         return {
             "ma150": ma150,
             "atr": atr,
             "trend": trend,
-            "sl_price": recommended_sl,
-            "current_price": current_market_price
+            "sl_price": final_sl,
+            "current_price": curr_price,
+            "reason": reason,
+            "entry": entry
         }, None
         
     except Exception as e:
         return None, str(e)
 
 # ==========================================
-# 3. PAGE & NOTIFICATIONS
+# 3. NOTIFICATIONS
 # ==========================================
-st.set_page_config(page_title="StockPulse Terminal", layout="wide", page_icon="💹", initial_sidebar_state="collapsed")
-
 def send_email_alert(to_email, ticker, current_price, target_price, direction, notes):
     if not SENDER_EMAIL or not SENDER_PASSWORD: return False, "Secrets missing"
     try:
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL; msg['To'] = to_email
         msg['Subject'] = f"🚀 StockPulse Alert: {ticker} hit ${current_price:,.2f}"
-        body = f"Ticker: {ticker}\nTrigger: ${current_price}\nTarget: ${target_price}"
+        body = f"Ticker: {ticker}\nTrigger: ${current_price}\nTarget: ${target_price}\nNote: {notes}"
         msg.attach(MIMEText(body, 'plain'))
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls(); server.login(SENDER_EMAIL, SENDER_PASSWORD)
@@ -143,7 +170,7 @@ def send_whatsapp_alert(to_number, ticker, current_price, target_price, directio
     if clean_digits.startswith("0"): clean_digits = "972" + clean_digits[1:]
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
-        client.messages.create(from_=TWILIO_FROM, body=f"🚀 {ticker} hit ${current_price}", to=f"whatsapp:+{clean_digits}")
+        client.messages.create(from_=TWILIO_FROM, body=f"🚀 {ticker} hit ${current_price} ({direction})", to=f"whatsapp:+{clean_digits}")
         return True, "WA Sent"
     except Exception as e: return False, str(e)
 
@@ -156,9 +183,10 @@ def apply_custom_ui():
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
         div[data-testid="stTextInput"] input { color: #fff !important; }
         .metric-container { background: #1c1c1e; border: 1px solid #333; border-radius: 8px; padding: 10px; text-align: center; }
-        .recommendation-box { background: #262730; border-left: 4px solid #FFC107; padding: 15px; margin-top: 10px; border-radius: 4px; }
-        .stat-value { font-size: 1.2rem; font-weight: bold; color: #FFC107; }
-        .sticky-note { background: #F9E79F; color: #000 !important; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
+        .recommendation-box { background: #262730; border: 1px solid #444; border-left: 4px solid #FFC107; padding: 20px; margin-top: 10px; border-radius: 8px; }
+        .stat-value { font-size: 1.8rem; font-weight: bold; color: #FFC107; margin: 10px 0; }
+        .sticky-note { background: #F9E79F; color: #000 !important; padding: 10px; border-radius: 8px; margin-bottom: 10px; box-shadow: 2px 2px 10px rgba(0,0,0,0.5); }
+        .reason-badge { background: #333; color: #aaa; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -211,15 +239,12 @@ def check_alerts():
     if not tickers: return
     
     try:
-        # Batch fetch for efficiency
         data = yf.download(tickers, period="1d", progress=False)['Close']
-        # Handle single ticker vs multiple tickers structure
         if len(tickers) == 1:
             current_prices = {tickers[0]: data.iloc[-1].item()}
         else:
             current_prices = data.iloc[-1].to_dict()
-    except:
-        return # Data fetch failed
+    except: return
 
     changes = False
     for idx, row in active_df.iterrows():
@@ -231,20 +256,17 @@ def check_alerts():
             
             tgt = float(row['target_price'])
             direct = row['direction']
-            # Trigger Logic
+            
             if (direct == "Up" and price >= tgt) or (direct == "Down" and price <= tgt):
-                # Send Alerts
                 if st.session_state.user_email: send_email_alert(st.session_state.user_email, tkr, price, tgt, direct, row['notes'])
                 if st.session_state.user_phone: send_whatsapp_alert(st.session_state.user_phone, tkr, price, tgt, direct)
                 
-                # Mark Complete
                 st.session_state.active_alerts.at[real_idx, 'status'] = 'Completed'
                 st.session_state.completed_alerts = pd.concat([st.session_state.completed_alerts, pd.DataFrame([row])], ignore_index=True)
                 changes = True
                 st.toast(f"🔥 Alert Triggered: {tkr}")
     
     if changes:
-        # Cleanup memory and sync
         st.session_state.active_alerts = st.session_state.active_alerts[st.session_state.active_alerts['status'] != 'Completed']
         st.session_state.active_alerts.reset_index(drop=True, inplace=True)
         sync_db(st.session_state.active_alerts)
@@ -257,7 +279,7 @@ def main():
     apply_custom_ui()
     st.markdown("<h1 style='text-align: center; color: #FFC107;'>⚡ StockPulse Terminal</h1>", unsafe_allow_html=True)
     
-    # --- HEADER & SETTINGS ---
+    # SETTINGS
     with st.expander("⚙️ Settings & Connection", expanded=False):
         c1, c2 = st.columns(2)
         with c1: st.text_input("Email", key="temp_email", value=st.session_state.user_email)
@@ -274,29 +296,25 @@ def main():
             time.sleep(60)
             st.rerun()
     
-    # --- TABS LAYOUT ---
     tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active Alerts", "🛡️ Smart SL Calculator", "📂 History"])
     
-    # --- TAB 1: ALERTS ---
+    # ALERTS TAB
     with tab_alerts:
         col_list, col_add = st.columns([2, 1])
-        
         with col_list:
             if not st.session_state.active_alerts.empty:
                 for idx, row in st.session_state.active_alerts.iterrows():
                     st.markdown(f"""
                     <div class="sticky-note">
                         <b>{row['ticker']}</b> | Target: <b>${row['target_price']}</b> ({row['direction']})<br>
-                        <small>Current: ${float(row['current_price']):.2f} | Note: {row['notes']}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        <small>Current: ${float(row['current_price']):.2f} | {row['notes']}</small>
+                    </div>""", unsafe_allow_html=True)
                     if st.button(f"🗑️ Delete {row['ticker']}", key=f"del_{idx}"):
                         st.session_state.active_alerts.drop(idx, inplace=True)
                         st.session_state.active_alerts.reset_index(drop=True, inplace=True)
                         sync_db(st.session_state.active_alerts)
                         st.rerun()
-            else:
-                st.info("No active alerts.")
+            else: st.info("No active alerts.")
 
         with col_add:
             st.markdown("### ➕ Manual Add")
@@ -311,66 +329,62 @@ def main():
                     sync_db(st.session_state.active_alerts)
                     st.rerun()
 
-    # --- TAB 2: SMART CALCULATOR ---
+    # CALCULATOR TAB (IMPROVED)
     with tab_calc:
-        st.markdown("### 🧠 AI-Assisted Stop Loss")
-        st.caption("Calculate optimal Stop Loss based on Volatility (ATR) and Trend (MA150).")
+        st.markdown("### 🧠 Smart Stop-Loss AI")
+        st.info("Calculates optimal SL based on: 1. Volatility (ATR) 2. Max 12% Loss Rule 3. MA150 Support")
         
         cc1, cc2 = st.columns(2)
-        with cc1: calc_ticker = st.text_input("Stock Ticker", placeholder="e.g. TSLA").upper()
+        with cc1: calc_ticker = st.text_input("Stock Ticker", placeholder="e.g. NVDA").upper()
         with cc2: buy_price = st.number_input("Purchase Price ($)", min_value=0.0, step=0.1)
         
-        if st.button("🔍 Analyze & Recommend"):
+        if st.button("🔍 Calculate Safe Stop"):
             if calc_ticker:
-                with st.spinner(f"Analyzing {calc_ticker}..."):
+                with st.spinner(f"Analyzing {calc_ticker} market structure..."):
                     res, err = calculate_smart_sl(calc_ticker, buy_price)
                     if err:
                         st.error(f"Error: {err}")
                     else:
-                        # Save result to session state to persist after button click
                         st.session_state.calc_res = res
                         st.session_state.calc_ticker = calc_ticker
-            else:
-                st.warning("Please enter a ticker.")
+            else: st.warning("Enter a ticker.")
 
-        # Display Results if available
         if 'calc_res' in st.session_state:
             res = st.session_state.calc_res
             tkr = st.session_state.calc_ticker
             
             st.markdown(f"""
             <div class="recommendation-box">
-                <h4>📊 Analysis for {tkr}</h4>
-                <div style="display: flex; justify-content: space-between;">
+                <h3 style='margin:0'>{tkr} Analysis</h3>
+                <div style="display: flex; gap: 20px; margin-top: 10px;">
                     <div>📉 <b>MA150:</b> ${res['ma150']:,.2f}</div>
-                    <div>🌊 <b>ATR (14):</b> ${res['atr']:,.2f}</div>
-                    <div>📈 <b>Trend:</b> {res['trend']}</div>
+                    <div>📊 <b>ATR:</b> ${res['atr']:,.2f}</div>
+                    <div>🚪 <b>Entry:</b> ${res['entry']:,.2f}</div>
                 </div>
-                <hr>
-                <div>🛡️ Recommended Stop Loss (2x ATR):</div>
-                <div class="stat-value">${res['sl_price']:,.2f}</div>
-                <small><i>Strategy: Place stop at ${res['sl_price']:.2f} to allow for normal volatility while protecting capital.</i></small>
+                <hr style="border-color: #444;">
+                <div style="color: #aaa; font-size: 0.9rem;">Determining Factor: <span class="reason-badge">{res['reason']}</span></div>
+                <div class="stat-value">Recommended SL: ${res['sl_price']:,.2f}</div>
+                <div style="color: {('#4CAF50' if 'UP' in res['trend'] else '#FF5252')}; font-weight:bold;">Trend: {res['trend']}</div>
             </div>
             """, unsafe_allow_html=True)
             
-            # One-click Add
-            if st.button(f"🔔 Create Alert for {tkr} at ${res['sl_price']:.2f}"):
+            if st.button(f"🔔 Set Stop Loss Alert at ${res['sl_price']:.2f}"):
                 new = {
                     "ticker": tkr,
                     "target_price": round(res['sl_price'], 2),
                     "current_price": res['current_price'],
-                    "direction": "Down", # Stop loss is usually triggered when price goes DOWN
-                    "notes": f"Smart SL (Entry: {buy_price}, ATR: {res['atr']:.2f})",
+                    "direction": "Down",
+                    "notes": f"Smart SL ({res['reason']})",
                     "created_at": str(datetime.now()),
                     "status": "Active"
                 }
                 st.session_state.active_alerts = pd.concat([st.session_state.active_alerts, pd.DataFrame([new])], ignore_index=True)
                 sync_db(st.session_state.active_alerts)
-                st.success(f"Alert set for {tkr}!")
+                st.success(f"Protection Set for {tkr}!")
                 time.sleep(1)
                 st.rerun()
 
-    # --- TAB 3: HISTORY ---
+    # HISTORY TAB
     with tab_hist:
         st.dataframe(st.session_state.completed_alerts, use_container_width=True)
 
