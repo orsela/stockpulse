@@ -275,4 +275,204 @@ def check_alerts():
         if tkr in live_data and live_data[tkr]['price'] != 0.0:
             cur = live_data[tkr]['price']
             st.session_state.active_alerts.loc[idx, 'current_price'] = cur
-            trig = (direct == "Up"
+            trig = (direct == "Up" and cur >= tgt) or (direct == "Down" and cur <= tgt)
+            if trig:
+                log = []
+                if st.session_state.user_email:
+                    ok, _ = send_email_alert(st.session_state.user_email, tkr, cur, tgt, direct, row['notes'])
+                    log.append(f"Email: {'✅' if ok else '❌'}")
+                if st.session_state.user_phone:
+                    ok, _ = send_whatsapp_alert(st.session_state.user_phone, tkr, cur, tgt, direct)
+                    log.append(f"WA: {'✅' if ok else '❌'}")
+                if not log: log.append("Local Only")
+                new = {"ticker": tkr, "target_price": tgt, "final_price": cur, "alert_time": datetime.now(), "direction": direct, "notes": row['notes'] + f" ({' | '.join(log)})"}
+                st.session_state.completed_alerts = pd.concat([st.session_state.completed_alerts, pd.DataFrame([new])], ignore_index=True)
+                to_move.append(idx)
+                st.toast(f"🚀 Alert: {tkr} @ ${cur:,.2f}\n{' | '.join(log)}", icon="🔥")
+    if to_move:
+        st.session_state.active_alerts.drop(to_move, inplace=True)
+        st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+        st.rerun()
+
+@st.cache_data(ttl=300) 
+def get_market_data_real():
+    inds = {"S&P 500": "^GSPC", "BITCOIN": "BTC-USD", "VIX": "^VIX", "NASDAQ": "^IXIC"}
+    res = []
+    for n, t in inds.items():
+        try:
+            h = yf.Ticker(t).history(period="1mo")
+            if not h.empty:
+                last = h['Close'].iloc[-1]
+                prev = h['Close'].iloc[-2] if len(h) >= 2 else last
+                d = "up" if last >= prev else "down"
+                res.append((n, f"{last:,.2f}", d))
+            else: res.append((n, "N/A", "down"))
+        except: res.append((n, "Error", "down"))
+    return res
+
+# ==========================================
+# 6. UI COMPONENTS
+# ==========================================
+def render_header_settings():
+    st.markdown("### <span style='color: #FFC107;'>Notification Settings ⚙️</span>", unsafe_allow_html=True)
+    st.caption("Define where you want to receive real-time alerts. Click 'Save' to persist.")
+    
+    with st.form("settings_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.text_input("📧 Email", key="temp_email", value=st.session_state.user_email, placeholder="name@company.com")
+        with c2:
+            st.text_input("📱 WhatsApp", key="temp_phone", value=st.session_state.user_phone, placeholder="050-1234567")
+        
+        c_sub, c_clear = st.columns([1, 1])
+        with c_sub:
+            submitted = st.form_submit_button("💾 Save Settings", use_container_width=True)
+        with c_clear:
+            cleared = st.form_submit_button("🧹 Clear", use_container_width=True)
+            
+        if submitted:
+            st.session_state.user_email = st.session_state.temp_email
+            st.session_state.user_phone = st.session_state.temp_phone
+            st.success("Settings Saved!")
+            
+        if cleared:
+            st.session_state.user_email = ""
+            st.session_state.user_phone = ""
+            st.session_state.temp_email = ""
+            st.session_state.temp_phone = ""
+            st.rerun()
+
+    # --- אזור שליטה: רענון ודיבאג ---
+    st.markdown("---")
+    col_auto, col_debug, col_status = st.columns([0.25, 0.25, 0.5])
+    
+    with col_auto:
+        auto_poll = st.toggle("🔄 Auto-Poll", value=False)
+    with col_debug:
+        if st.button("🐞 Debug WA"):
+            st.session_state.show_debug = not st.session_state.show_debug
+            # קריאה יזומה לעדכון הלוגים
+            process_incoming_whatsapp()
+            st.rerun()
+            
+    with col_status:
+        if auto_poll:
+            st.markdown("<span class='poll-badge-on'>Listening... (Refreshing every 60s)</span>", unsafe_allow_html=True)
+            time.sleep(60)
+            st.rerun()
+        else:
+            st.markdown("<span class='poll-badge-off'>Auto-poll disabled</span>", unsafe_allow_html=True)
+
+    # --- חלונית הדיבאג המשודרגת ---
+    if st.session_state.show_debug:
+        with st.expander("🛠️ WhatsApp Debug Logs (ALL MESSAGES)", expanded=True):
+            st.write(f"**My Phone (Expected):** `{st.session_state.debug_info.get('my_number_formatted', 'N/A')}`")
+            st.write(f"**Twilio Number (Configured):** `{st.session_state.debug_info.get('twilio_configured_number', 'N/A')}`")
+            
+            if "error" in st.session_state.debug_info:
+                st.error(st.session_state.debug_info["error"])
+            
+            msgs = st.session_state.debug_info.get("messages_found", [])
+            if msgs:
+                st.write(f"Found {len(msgs)} messages in Twilio logs:")
+                # יצירת טבלה פשוטה לקריאה
+                df_msgs = pd.DataFrame(msgs)
+                # בחירת עמודות רלוונטיות לתצוגה
+                if not df_msgs.empty:
+                    st.dataframe(df_msgs[['direction', 'from', 'to', 'body', 'date']], use_container_width=True)
+            else:
+                st.warning("No messages found at all. Check Twilio credentials.")
+
+
+def render_top_bar():
+    metrics = get_market_data_real()
+    cols = st.columns(4)
+    for i, (name, val, direction) in enumerate(metrics):
+        if i < 4:
+            arrow = "⬇" if direction == "down" else "⬆"
+            cls = "metric-down" if direction == "down" else "metric-up"
+            with cols[i]:
+                st.markdown(f"""<div class="metric-container"><div class="metric-title">{name}</div><div class="metric-value">{val}</div><div class="{cls}">{arrow}</div></div>""", unsafe_allow_html=True)
+
+def render_sticky_note(ticker, live_data, alert_row, index):
+    data = live_data.get(ticker, {})
+    price = data.get('price', 0.0)
+    ma150 = data.get('MA150', 0.0)
+    target = alert_row['target_price']
+    direction = alert_row['direction']
+    notes = alert_row['notes']
+    arrow = "⬆" if direction == "Up" else "⬇"
+
+    st.markdown(f"""
+    <div class="sticky-note">
+        <div class="note-header"><div class="note-ticker">{ticker}</div><div class="target-marker">{arrow} 🎯 ${target:,.2f}</div></div>
+        <div class="note-price">Current: ${price:,.2f}</div>
+        <div style="font-size: 0.9em; margin-top:5px;">MA150: ${ma150:,.2f} | Dir: {direction}</div>
+        <div style="margin-top: 10px; font-style: italic; background: rgba(255,255,255,0.3); padding: 5px; border-radius: 4px;">"{notes}"</div>
+    </div>""", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        with st.popover("✏️ Edit", use_container_width=True):
+            ed_t = st.text_input("Ticker", value=ticker, key=f"et_{index}")
+            ed_p = st.number_input("Price", value=float(target), key=f"ep_{index}")
+            ed_d = st.selectbox("Dir", ["Up", "Down"], index=0 if direction=="Up" else 1, key=f"ed_{index}")
+            ed_n = st.text_area("Notes", value=notes, key=f"en_{index}")
+            if st.button("Save", key=f"sv_{index}"):
+                st.session_state.active_alerts.at[index, 'ticker'] = ed_t.upper()
+                st.session_state.active_alerts.at[index, 'target_price'] = ed_p
+                st.session_state.active_alerts.at[index, 'direction'] = ed_d
+                st.session_state.active_alerts.at[index, 'notes'] = ed_n
+                st.rerun()
+    with c2:
+        if st.button("🗑️ Del", key=f"del_{index}", use_container_width=True):
+            st.session_state.active_alerts.drop(index, inplace=True)
+            st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+            st.rerun()
+
+# ==========================================
+# 7. MAIN APP
+# ==========================================
+def main():
+    apply_custom_ui()
+    st.markdown("<h1 style='text-align: center; color: #FFC107;'>⚡ StockPulse Terminal</h1>", unsafe_allow_html=True)
+    render_header_settings()
+    render_top_bar()
+    st.markdown("<div class='connection-bar'><span class='connection-dot'></span><span>Connected to price server</span></div>", unsafe_allow_html=True)
+    check_alerts()
+    st.write("---")
+    
+    col_alerts, col_create = st.columns([1.2, 1], gap="large")
+    with col_alerts:
+        st.markdown("### 🔔 Active Alerts")
+        if not st.session_state.active_alerts.empty:
+            tickers = st.session_state.active_alerts['ticker'].tolist()
+            live_data = get_live_data(tickers)
+            cols = st.columns(2)
+            for i, row in st.session_state.active_alerts.iterrows():
+                with cols[i % 2]:
+                    render_sticky_note(row['ticker'], live_data, row, i)
+        else:
+            st.info("No active alerts.")
+            
+    with col_create:
+        st.markdown('<div class="create-form-container"><div class="form-header">➕ Create New Alert</div>', unsafe_allow_html=True)
+        with st.form("create_alert_form", clear_on_submit=True):
+            t_in = st.text_input("Ticker", placeholder="e.g. NVDA").upper()
+            c1, c2 = st.columns(2)
+            with c1: p_in = st.slider("Target", 0.0, 2000.0, 200.0)
+            with c2: d_in = st.selectbox("Direction", ["Up", "Down"])
+            n_in = st.text_area("Notes", placeholder="Strategy details...")
+            if st.form_submit_button("ADD NOTIFICATION ➔", use_container_width=True):
+                if t_in and p_in > 0:
+                    new = {"ticker": t_in, "target_price": p_in, "current_price": 0.0, "direction": d_in, "notes": n_in or "No notes", "created_at": datetime.now()}
+                    st.session_state.active_alerts = pd.concat([st.session_state.active_alerts, pd.DataFrame([new])], ignore_index=True)
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    st.write("---")
+    with st.expander("📂 View History"):
+        st.dataframe(st.session_state.completed_alerts, use_container_width=True)
+
+if __name__ == "__main__":
+    main()
