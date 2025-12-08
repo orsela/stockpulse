@@ -67,7 +67,6 @@ def send_whatsapp_alert(to_number, ticker, current_price, target_price, directio
     
     # ניקוי מספר: משאיר רק ספרות
     clean_digits = re.sub(r'\D', '', str(to_number))
-    # המרה לפורמט בינלאומי אם מתחיל ב-0
     if clean_digits.startswith("0"):
         clean_digits = "972" + clean_digits[1:]
         
@@ -161,13 +160,6 @@ if 'active_alerts' not in st.session_state:
 if 'completed_alerts' not in st.session_state:
     st.session_state.completed_alerts = pd.DataFrame(columns=["ticker", "target_price", "final_price", "alert_time", "direction", "notes"])
 
-# קובע אם להציג מידע דיבאג
-if 'show_debug' not in st.session_state:
-    st.session_state.show_debug = False
-
-if 'debug_info' not in st.session_state:
-    st.session_state.debug_info = {}
-
 REFRESH_RATE = 60
 
 @st.cache_data(ttl=REFRESH_RATE)
@@ -188,50 +180,25 @@ def get_live_data(tickers):
     return live_data
 
 # ==========================================
-# 5. WHATSAPP LOGIC (FULL DEBUG VERSION)
+# 5. WHATSAPP INBOUND LOGIC (CLEAN)
 # ==========================================
 def process_incoming_whatsapp():
-    # בדיקה שיש הגדרות טוויליו
-    if not TWILIO_SID or not TWILIO_TOKEN: 
-        if st.session_state.show_debug:
-            st.session_state.debug_info = {"error": "Twilio Secrets Missing!"}
-        return
+    if not TWILIO_SID or not TWILIO_TOKEN or not st.session_state.user_phone: return
     
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
         
-        # 1. הכנת המספר הצפוי של המשתמש (לצורך השוואה)
-        user_phone_clean = ""
-        expected_sender = ""
-        if st.session_state.user_phone:
-            raw_phone = str(st.session_state.user_phone)
-            digits_only = re.sub(r'\D', '', raw_phone) 
-            if digits_only.startswith("0"):
-                digits_only = "972" + digits_only[1:]
-            expected_sender = f"whatsapp:+{digits_only}"
+        # ניקוי מספר המשתמש לפורמט השוואה
+        raw_phone = str(st.session_state.user_phone)
+        digits_only = re.sub(r'\D', '', raw_phone)
+        if digits_only.startswith("0"):
+            digits_only = "972" + digits_only[1:]
+        expected_sender = f"whatsapp:+{digits_only}"
         
-        # 2. אתחול מידע לדיבאג
-        st.session_state.debug_info = {
-            "my_number_formatted": expected_sender,
-            "twilio_configured_number": TWILIO_FROM, # זה המספר שמוגדר ב-Secrets של המערכת
-            "messages_found": []
-        }
-        
-        # 3. משיכת כל ההודעות האחרונות (ללא פילטר כדי לראות מה מתקבל באמת)
-        messages = client.messages.list(limit=20)
+        # משיכת הודעות אחרונות
+        messages = client.messages.list(limit=15, to=TWILIO_FROM)
         
         for msg in messages:
-            # הוספת כל הודעה שנמצאה ללוג הדיבאג
-            st.session_state.debug_info["messages_found"].append({
-                "direction": msg.direction, # inbound / outbound
-                "from": msg.from_,
-                "to": msg.to,
-                "body": msg.body,
-                "sid": msg.sid,
-                "date": str(msg.date_created)
-            })
-            
-            # לוגיקה: האם זו הודעה נכנסת (inbound) והאם היא מהמשתמש שלנו?
             is_inbound = (msg.direction == 'inbound')
             is_from_user = (msg.from_ == expected_sender)
             is_new = (msg.sid not in st.session_state.processed_msgs)
@@ -239,7 +206,6 @@ def process_incoming_whatsapp():
             if is_inbound and is_from_user and is_new:
                 st.session_state.processed_msgs.add(msg.sid)
                 
-                # פענוח ההודעה
                 body = msg.body.strip().upper()
                 match = re.match(r"^([A-Z]+)\s+(\d+(\.\d+)?)$", body)
                 
@@ -257,12 +223,11 @@ def process_incoming_whatsapp():
                     st.session_state.active_alerts = pd.concat([st.session_state.active_alerts, pd.DataFrame([new_alert])], ignore_index=True)
                     st.toast(f"📱 WhatsApp: Added {ticker} @ {target}", icon="✅")
                     
-    except Exception as e:
-        st.session_state.debug_info["error"] = str(e)
+    except Exception:
+        pass # הפקה נקייה - שגיאות לא מוצגות למשתמש
 
 def check_alerts():
-    # קריאה לפונקציית העיבוד לפני בדיקת המחירים
-    process_incoming_whatsapp()
+    process_incoming_whatsapp() # בדיקת הודעות נכנסות בכל סבב
     
     if st.session_state.active_alerts.empty: return
     tickers = st.session_state.active_alerts['ticker'].tolist()
@@ -331,6 +296,7 @@ def render_header_settings():
             cleared = st.form_submit_button("🧹 Clear", use_container_width=True)
             
         if submitted:
+            # וולידציה פשוטה בעת שמירה
             st.session_state.user_email = st.session_state.temp_email
             st.session_state.user_phone = st.session_state.temp_phone
             st.success("Settings Saved!")
@@ -342,46 +308,20 @@ def render_header_settings():
             st.session_state.temp_phone = ""
             st.rerun()
 
-    # --- אזור שליטה: רענון ודיבאג ---
+    # אזור שליטה ברענון אוטומטי (ללא דיבאג)
     st.markdown("---")
-    col_auto, col_debug, col_status = st.columns([0.25, 0.25, 0.5])
+    col_auto, col_status = st.columns([0.3, 0.7])
     
     with col_auto:
-        auto_poll = st.toggle("🔄 Auto-Poll", value=False)
-    with col_debug:
-        if st.button("🐞 Debug WA"):
-            st.session_state.show_debug = not st.session_state.show_debug
-            # קריאה יזומה לעדכון הלוגים
-            process_incoming_whatsapp()
-            st.rerun()
+        auto_poll = st.toggle("🔄 Auto-Poll (60s)", value=False)
             
     with col_status:
         if auto_poll:
-            st.markdown("<span class='poll-badge-on'>Listening... (Refreshing every 60s)</span>", unsafe_allow_html=True)
+            st.markdown("<span class='poll-badge-on'>Listening for messages...</span>", unsafe_allow_html=True)
             time.sleep(60)
             st.rerun()
         else:
             st.markdown("<span class='poll-badge-off'>Auto-poll disabled</span>", unsafe_allow_html=True)
-
-    # --- חלונית הדיבאג המשודרגת ---
-    if st.session_state.show_debug:
-        with st.expander("🛠️ WhatsApp Debug Logs (ALL MESSAGES)", expanded=True):
-            st.write(f"**My Phone (Expected):** `{st.session_state.debug_info.get('my_number_formatted', 'N/A')}`")
-            st.write(f"**Twilio Number (Configured):** `{st.session_state.debug_info.get('twilio_configured_number', 'N/A')}`")
-            
-            if "error" in st.session_state.debug_info:
-                st.error(st.session_state.debug_info["error"])
-            
-            msgs = st.session_state.debug_info.get("messages_found", [])
-            if msgs:
-                st.write(f"Found {len(msgs)} messages in Twilio logs:")
-                # יצירת טבלה פשוטה לקריאה
-                df_msgs = pd.DataFrame(msgs)
-                # בחירת עמודות רלוונטיות לתצוגה
-                if not df_msgs.empty:
-                    st.dataframe(df_msgs[['direction', 'from', 'to', 'body', 'date']], use_container_width=True)
-            else:
-                st.warning("No messages found at all. Check Twilio credentials.")
 
 
 def render_top_bar():
