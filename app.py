@@ -114,4 +114,245 @@ def apply_custom_ui():
             background-color: #F9E79F; color: #222 !important; padding: 15px;
             border-radius: 4px; margin-bottom: 15px; border-top: 1px solid #fcf3cf;
         }
-        .note-ticker { color: #000 !important; font-size
+        .note-ticker { color: #000 !important; font-size: 1.4rem; font-weight: 800; }
+        .note-price, .sticky-note div { color: #333 !important; }
+        .target-marker { color: #d32f2f; font-weight: 700; font-size: 1.1rem; }
+        
+        /* GENERAL */
+        .create-form-container {
+            background-color: #1a1a1a; border: 1px solid #333;
+            border-radius: 12px; padding: 20px;
+        }
+        .form-header { color: #FFC107; font-size: 1.5rem; font-weight: bold; margin-bottom: 15px; }
+        div.stButton > button {
+            background-color: #FFC107 !important; color: #000000 !important; 
+            font-weight: 800 !important; border-radius: 8px !important;
+        }
+        .connection-dot {
+            width: 10px; height: 10px; border-radius: 50%; background-color: #00e676;
+            display: inline-block; box-shadow: 0 0 8px #00e676; margin-right: 8px;
+        }
+        .connection-bar { color: #888; font-size: 0.85rem; margin-top: 5px; margin-bottom: 15px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ==========================================
+# 4. STATE MANAGEMENT
+# ==========================================
+if 'user_email' not in st.session_state:
+    st.session_state.user_email = ""
+if 'user_phone' not in st.session_state:
+    st.session_state.user_phone = ""
+if 'active_alerts' not in st.session_state:
+    st.session_state.active_alerts = pd.DataFrame([{
+        "ticker": "NVDA", "target_price": 950.00, "current_price": 900.00,
+        "direction": "Up", "notes": "Strong earnings expected", "created_at": datetime.now()
+    }])
+if 'completed_alerts' not in st.session_state:
+    st.session_state.completed_alerts = pd.DataFrame(columns=["ticker", "target_price", "final_price", "alert_time", "direction", "notes"])
+
+REFRESH_RATE = 60
+
+@st.cache_data(ttl=REFRESH_RATE)
+def get_live_data(tickers):
+    if not tickers: return {}
+    live_data = {}
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            curr = info.get('regularMarketPrice', info.get('currentPrice', None))
+            prev = info.get('previousClose', None)
+            price = curr if curr not in (None, "N/A") else prev
+            ma150 = info.get('twoHundredDayAverage', info.get('fiftyDayAverage', 0))
+            live_data[ticker] = {"price": price if price else 0.0, "MA150": ma150 if ma150 else 0.0}
+        except:
+            live_data[ticker] = {"price": 0.0, "MA150": 0.0}
+    return live_data
+
+def check_alerts():
+    if st.session_state.active_alerts.empty: return
+    tickers = st.session_state.active_alerts['ticker'].tolist()
+    live_data = get_live_data(tickers)
+    to_move = []
+    for idx, row in st.session_state.active_alerts.iterrows():
+        tkr = row['ticker']
+        tgt = row['target_price']
+        direct = row['direction']
+        if tkr in live_data and live_data[tkr]['price'] != 0.0:
+            cur = live_data[tkr]['price']
+            st.session_state.active_alerts.loc[idx, 'current_price'] = cur
+            trig = (direct == "Up" and cur >= tgt) or (direct == "Down" and cur <= tgt)
+            if trig:
+                log = []
+                if st.session_state.user_email:
+                    ok, _ = send_email_alert(st.session_state.user_email, tkr, cur, tgt, direct, row['notes'])
+                    log.append(f"Email: {'✅' if ok else '❌'}")
+                if st.session_state.user_phone:
+                    ok, _ = send_whatsapp_alert(st.session_state.user_phone, tkr, cur, tgt, direct)
+                    log.append(f"WA: {'✅' if ok else '❌'}")
+                if not log: log.append("Local Only")
+                
+                new = {"ticker": tkr, "target_price": tgt, "final_price": cur, "alert_time": datetime.now(), 
+                       "direction": direct, "notes": row['notes'] + f" ({' | '.join(log)})"}
+                st.session_state.completed_alerts = pd.concat([st.session_state.completed_alerts, pd.DataFrame([new])], ignore_index=True)
+                to_move.append(idx)
+                st.toast(f"🚀 Alert: {tkr} @ ${cur:,.2f}\n{' | '.join(log)}", icon="🔥")
+    if to_move:
+        st.session_state.active_alerts.drop(to_move, inplace=True)
+        st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+        st.rerun()
+
+@st.cache_data(ttl=300) 
+def get_market_data_real():
+    inds = {"S&P 500": "^GSPC", "BITCOIN": "BTC-USD", "VIX": "^VIX", "NASDAQ": "^IXIC"}
+    res = []
+    for n, t in inds.items():
+        try:
+            h = yf.Ticker(t).history(period="1mo")
+            if not h.empty:
+                last = h['Close'].iloc[-1]
+                prev = h['Close'].iloc[-2] if len(h) >= 2 else last
+                d = "up" if last >= prev else "down"
+                res.append((n, f"{last:,.2f}", d))
+            else: res.append((n, "N/A", "down"))
+        except: res.append((n, "Error", "down"))
+    return res
+
+# ==========================================
+# 6. UI COMPONENTS & VALIDATION
+# ==========================================
+
+# --- פונקציות וולידציה חדשות ---
+def validate_email_callback():
+    email = st.session_state.user_email
+    if email: # רק אם יש טקסט
+        # בדיקת פורמט מייל סטנדרטי
+        pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+        if not re.match(pattern, email):
+            st.toast("❌ כתובת מייל לא חוקית! הנתון נמחק.", icon="⚠️")
+            st.session_state.user_email = "" # מחיקת הנתון
+
+def validate_phone_callback():
+    phone = st.session_state.user_phone
+    if phone:
+        # בדיקה לטלפון ישראלי (עם או בלי מקף)
+        # מקבל: 0501234567 או 050-1234567
+        pattern = r"^05\d[-]?\d{7}$"
+        if not re.match(pattern, phone):
+            st.toast("❌ מספר טלפון לא חוקי! יש להזין נייד ישראלי (05X-XXXXXXX).", icon="⚠️")
+            st.session_state.user_phone = "" # מחיקת הנתון
+
+def render_header_settings():
+    st.markdown("### <span style='color: #FFC107;'>Notification Settings ⚙️</span>", unsafe_allow_html=True)
+    st.caption("Define where you want to receive real-time alerts.")
+    col1, col2 = st.columns(2, gap="medium")
+    with col1:
+        # הוספנו key ו-on_change
+        st.text_input(
+            "📧 Email Destination", 
+            key="user_email", # מקשר ישירות ל-session_state
+            placeholder="name@company.com",
+            on_change=validate_email_callback # קריאה לבדיקה בעת שינוי
+        )
+    with col2:
+        # הוספנו key ו-on_change
+        st.text_input(
+            "📱 WhatsApp Number", 
+            key="user_phone", 
+            placeholder="050-1234567",
+            on_change=validate_phone_callback # קריאה לבדיקה בעת שינוי
+        )
+
+def render_top_bar():
+    metrics = get_market_data_real()
+    cols = st.columns(4)
+    for i, (name, val, direction) in enumerate(metrics):
+        if i < 4:
+            arrow = "⬇" if direction == "down" else "⬆"
+            cls = "metric-down" if direction == "down" else "metric-up"
+            with cols[i]:
+                st.markdown(f"""<div class="metric-container"><div class="metric-title">{name}</div><div class="metric-value">{val}</div><div class="{cls}">{arrow}</div></div>""", unsafe_allow_html=True)
+
+def render_sticky_note(ticker, live_data, alert_row, index):
+    data = live_data.get(ticker, {})
+    price = data.get('price', 0.0)
+    ma150 = data.get('MA150', 0.0)
+    target = alert_row['target_price']
+    direction = alert_row['direction']
+    notes = alert_row['notes']
+    arrow = "⬆" if direction == "Up" else "⬇"
+
+    st.markdown(f"""
+    <div class="sticky-note">
+        <div class="note-header"><div class="note-ticker">{ticker}</div><div class="target-marker">{arrow} 🎯 ${target:,.2f}</div></div>
+        <div class="note-price">Current: ${price:,.2f}</div>
+        <div style="font-size: 0.9em; margin-top:5px;">MA150: ${ma150:,.2f} | Dir: {direction}</div>
+        <div style="margin-top: 10px; font-style: italic; background: rgba(255,255,255,0.3); padding: 5px; border-radius: 4px;">"{notes}"</div>
+    </div>""", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        with st.popover("✏️ Edit", use_container_width=True):
+            ed_t = st.text_input("Ticker", value=ticker, key=f"et_{index}")
+            ed_p = st.number_input("Price", value=float(target), key=f"ep_{index}")
+            ed_d = st.selectbox("Dir", ["Up", "Down"], index=0 if direction=="Up" else 1, key=f"ed_{index}")
+            ed_n = st.text_area("Notes", value=notes, key=f"en_{index}")
+            if st.button("Save", key=f"sv_{index}"):
+                st.session_state.active_alerts.at[index, 'ticker'] = ed_t.upper()
+                st.session_state.active_alerts.at[index, 'target_price'] = ed_p
+                st.session_state.active_alerts.at[index, 'direction'] = ed_d
+                st.session_state.active_alerts.at[index, 'notes'] = ed_n
+                st.rerun()
+    with c2:
+        if st.button("🗑️ Del", key=f"del_{index}", use_container_width=True):
+            st.session_state.active_alerts.drop(index, inplace=True)
+            st.session_state.active_alerts.reset_index(drop=True, inplace=True)
+            st.rerun()
+
+# ==========================================
+# 7. MAIN APP
+# ==========================================
+def main():
+    apply_custom_ui()
+    st.markdown("<h1 style='text-align: center; color: #FFC107;'>⚡ StockPulse Terminal</h1>", unsafe_allow_html=True)
+    render_header_settings()
+    render_top_bar()
+    st.markdown("<div class='connection-bar'><span class='connection-dot'></span><span>Connected to price server</span></div>", unsafe_allow_html=True)
+    check_alerts()
+    st.write("---")
+    
+    col_alerts, col_create = st.columns([1.2, 1], gap="large")
+    with col_alerts:
+        st.markdown("### 🔔 Active Alerts")
+        if not st.session_state.active_alerts.empty:
+            tickers = st.session_state.active_alerts['ticker'].tolist()
+            live_data = get_live_data(tickers)
+            cols = st.columns(2)
+            for i, row in st.session_state.active_alerts.iterrows():
+                with cols[i % 2]:
+                    render_sticky_note(row['ticker'], live_data, row, i)
+        else:
+            st.info("No active alerts.")
+            
+    with col_create:
+        st.markdown('<div class="create-form-container"><div class="form-header">➕ Create New Alert</div>', unsafe_allow_html=True)
+        with st.form("create_alert_form", clear_on_submit=True):
+            t_in = st.text_input("Ticker", placeholder="e.g. NVDA").upper()
+            c1, c2 = st.columns(2)
+            with c1: p_in = st.slider("Target", 0.0, 2000.0, 200.0)
+            with c2: d_in = st.selectbox("Direction", ["Up", "Down"])
+            n_in = st.text_area("Notes", placeholder="Strategy details...")
+            if st.form_submit_button("ADD NOTIFICATION ➔", use_container_width=True):
+                if t_in and p_in > 0:
+                    new = {"ticker": t_in, "target_price": p_in, "current_price": 0.0, "direction": d_in, "notes": n_in or "No notes", "created_at": datetime.now()}
+                    st.session_state.active_alerts = pd.concat([st.session_state.active_alerts, pd.DataFrame([new])], ignore_index=True)
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    st.write("---")
+    with st.expander("📂 View History"):
+        st.dataframe(st.session_state.completed_alerts, use_container_width=True)
+
+if __name__ == "__main__":
+    main()
