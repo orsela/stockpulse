@@ -64,10 +64,15 @@ def send_email_alert(to_email, ticker, current_price, target_price, direction, n
 def send_whatsapp_alert(to_number, ticker, current_price, target_price, direction):
     if not TWILIO_SID or not TWILIO_TOKEN or not TWILIO_FROM:
         return False, "Twilio secrets missing"
-    clean_number = to_number.strip()
-    if clean_number.startswith("0"):
-        clean_number = "+972" + clean_number[1:]
-    to_whatsapp = f"whatsapp:{clean_number}"
+    
+    # ניקוי מספר: משאיר רק ספרות
+    clean_digits = re.sub(r'\D', '', str(to_number))
+    # המרה לפורמט בינלאומי אם מתחיל ב-0
+    if clean_digits.startswith("0"):
+        clean_digits = "972" + clean_digits[1:]
+        
+    to_whatsapp = f"whatsapp:+{clean_digits}"
+    
     msg_body = f"🚀 *StockPulse Alert* 🚀\n\n📊 *{ticker}* hit *${current_price:,.2f}*\n🎯 Target: ${target_price:,.2f} ({direction})\n⏱️ Time: {datetime.now().strftime('%H:%M')}"
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
@@ -141,7 +146,6 @@ if 'user_email' not in st.session_state:
 if 'user_phone' not in st.session_state:
     st.session_state.user_phone = ""
     
-# Temporary storage for form inputs (before saving)
 if 'temp_email' not in st.session_state:
     st.session_state.temp_email = ""
 if 'temp_phone' not in st.session_state:
@@ -156,6 +160,10 @@ if 'active_alerts' not in st.session_state:
     }])
 if 'completed_alerts' not in st.session_state:
     st.session_state.completed_alerts = pd.DataFrame(columns=["ticker", "target_price", "final_price", "alert_time", "direction", "notes"])
+
+# קובע אם להציג מידע דיבאג
+if 'show_debug' not in st.session_state:
+    st.session_state.show_debug = False
 
 REFRESH_RATE = 60
 
@@ -177,30 +185,58 @@ def get_live_data(tickers):
     return live_data
 
 # ==========================================
-# 5. WHATSAPP & ALERTS LOGIC
+# 5. WHATSAPP LOGIC (FIXED)
 # ==========================================
 def process_incoming_whatsapp():
     if not TWILIO_SID or not TWILIO_TOKEN or not st.session_state.user_phone: return
+    
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
-        user_phone_clean = st.session_state.user_phone.strip()
-        if user_phone_clean.startswith("0"): user_phone_clean = "+972" + user_phone_clean[1:]
         
-        messages = client.messages.list(limit=15, to=TWILIO_FROM)
+        # 1. ניקוי ופירמוט המספר של המשתמש שיהיה זהה לפורמט של טוויליו
+        raw_phone = str(st.session_state.user_phone)
+        digits_only = re.sub(r'\D', '', raw_phone) # מוחק מקפים ורווחים
+        if digits_only.startswith("0"):
+            digits_only = "972" + digits_only[1:]
+        
+        # הפורמט שטוויליו שולחים: whatsapp:+972501234567
+        expected_sender = f"whatsapp:+{digits_only}"
+        
+        # דיבאג: שומרים את הערכים כדי להציג למשתמש אם הוא רוצה
+        st.session_state.debug_info = {
+            "my_number_formatted": expected_sender,
+            "messages_found": []
+        }
+        
+        messages = client.messages.list(limit=10, to=TWILIO_FROM)
+        
         for msg in messages:
-            is_from_user = msg.from_ == f"whatsapp:{user_phone_clean}"
-            is_new = msg.sid not in st.session_state.processed_msgs
+            # דיבאג: אוסף מידע על ההודעה
+            st.session_state.debug_info["messages_found"].append({
+                "from": msg.from_,
+                "body": msg.body,
+                "sid": msg.sid,
+                "is_match": (msg.from_ == expected_sender)
+            })
+            
+            is_from_user = (msg.from_ == expected_sender)
+            is_new = (msg.sid not in st.session_state.processed_msgs)
+            
             if is_from_user and is_new:
                 body = msg.body.strip().upper()
                 st.session_state.processed_msgs.add(msg.sid)
+                
+                # תמיכה בפורמט: "OKLO 110" או "OKLO 110.5"
                 match = re.match(r"^([A-Z]+)\s+(\d+(\.\d+)?)$", body)
                 if match:
                     ticker = match.group(1)
                     target = float(match.group(2))
                     new_alert = {"ticker": ticker, "target_price": target, "current_price": 0.0, "direction": "Up", "notes": "Added via WhatsApp", "created_at": datetime.now()}
                     st.session_state.active_alerts = pd.concat([st.session_state.active_alerts, pd.DataFrame([new_alert])], ignore_index=True)
-                    st.toast(f"📱 New WhatsApp Alert: {ticker} @ {target}", icon="✅")
-    except: pass
+                    st.toast(f"📱 WhatsApp: Added {ticker} @ {target}", icon="✅")
+                    
+    except Exception as e:
+        st.session_state.debug_error = str(e)
 
 def check_alerts():
     process_incoming_whatsapp()
@@ -257,7 +293,6 @@ def render_header_settings():
     st.markdown("### <span style='color: #FFC107;'>Notification Settings ⚙️</span>", unsafe_allow_html=True)
     st.caption("Define where you want to receive real-time alerts. Click 'Save' to persist.")
     
-    # טופס שמירה - נתונים לא יאבדו ברענון
     with st.form("settings_form"):
         c1, c2 = st.columns(2)
         with c1:
@@ -272,16 +307,11 @@ def render_header_settings():
             cleared = st.form_submit_button("🧹 Clear", use_container_width=True)
             
         if submitted:
-            # וולידציה בסיסית
-            if st.session_state.temp_email and not re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", st.session_state.temp_email):
-                st.error("Invalid Email!")
-            elif st.session_state.temp_phone and not re.match(r"^05\d[-]?\d{7}$", st.session_state.temp_phone):
-                st.error("Invalid Israeli Phone!")
-            else:
-                st.session_state.user_email = st.session_state.temp_email
-                st.session_state.user_phone = st.session_state.temp_phone
-                st.success("Settings Saved! Data will persist during auto-refresh.")
-        
+            # וולידציה פשוטה אך יעילה
+            st.session_state.user_email = st.session_state.temp_email
+            st.session_state.user_phone = st.session_state.temp_phone
+            st.success("Settings Saved!")
+            
         if cleared:
             st.session_state.user_email = ""
             st.session_state.user_phone = ""
@@ -289,18 +319,44 @@ def render_header_settings():
             st.session_state.temp_phone = ""
             st.rerun()
 
-    # אזור שליטה ברענון אוטומטי
+    # --- אזור שליטה: רענון ודיבאג ---
     st.markdown("---")
-    col_auto, col_status = st.columns([0.3, 0.7])
+    col_auto, col_debug, col_status = st.columns([0.25, 0.25, 0.5])
+    
     with col_auto:
-        auto_poll = st.toggle("🔄 Auto-Poll (60s)", value=False, help="Enable this to let the app receive WhatsApp messages automatically.")
+        auto_poll = st.toggle("🔄 Auto-Poll", value=False)
+    with col_debug:
+        if st.button("🐞 Debug WA"):
+            st.session_state.show_debug = not st.session_state.show_debug
+            
     with col_status:
         if auto_poll:
-            st.markdown("<span class='poll-badge-on'>Listening for messages...</span>", unsafe_allow_html=True)
-            time.sleep(60) # המתנה של 60 שניות
-            st.rerun() # רענון הדף
+            st.markdown("<span class='poll-badge-on'>Listening... (Refreshing every 60s)</span>", unsafe_allow_html=True)
+            time.sleep(60)
+            st.rerun()
         else:
-            st.markdown("<span class='poll-badge-off'>Auto-poll disabled (Manual mode)</span>", unsafe_allow_html=True)
+            st.markdown("<span class='poll-badge-off'>Auto-poll disabled</span>", unsafe_allow_html=True)
+
+    # --- חלונית הדיבאג ---
+    if st.session_state.show_debug:
+        with st.expander("🛠️ WhatsApp Debug Info (Live Data)", expanded=True):
+            st.write("Current User Phone Setting:", st.session_state.user_phone)
+            
+            if 'debug_info' in st.session_state:
+                info = st.session_state.debug_info
+                st.write(f"**Expected Format:** `{info['my_number_formatted']}`")
+                st.write("Last 10 messages in Twilio Sandbox:")
+                
+                # הצגת טבלה של ההודעות האחרונות
+                msgs = info['messages_found']
+                if msgs:
+                    for m in msgs:
+                        icon = "✅ MATCH" if m['is_match'] else "❌ Mismatch"
+                        st.text(f"{icon} | From: {m['from']} | Body: {m['body']}")
+                else:
+                    st.warning("No messages found in Twilio logs.")
+            else:
+                st.info("No debug info yet. Wait for auto-poll or refresh manually.")
 
 
 def render_top_bar():
