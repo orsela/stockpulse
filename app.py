@@ -32,7 +32,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
 # ---------------------------------------------------------
-# הקישור לגיליון שלך
+# הקישור לגיליון שלך (עודכן בקוד)
 # ---------------------------------------------------------
 SHEET_URL = "https://docs.google.com/spreadsheets/d/18GROVu8c2Hx5n4H2FiZrOeLXgH9xJG0miPqfgdb-V9w/edit?usp=sharing"
 
@@ -50,8 +50,8 @@ def get_db_connection():
         sheet = client.open_by_url(SHEET_URL).sheet1
         return sheet
     except Exception as e:
-        # הצגת השגיאה האמיתית כדי שנבין מה קורה אם זה נכשל
-        st.error(f"Database Connection Error: {e}")
+        # הודעת שגיאה מעודכנת לזיהוי הגרסה החדשה
+        st.error(f"Database Connection Error (URL Mode): {e}")
         return None
 
 def load_data_from_db():
@@ -65,7 +65,7 @@ def load_data_from_db():
         if df.empty:
             return pd.DataFrame(columns=["ticker", "target_price", "current_price", "direction", "notes", "created_at", "status"])
         
-        # וידוא שכל העמודות קיימות (למניעת קריסה אם הגיליון חדש)
+        # וידוא שכל העמודות קיימות
         expected_cols = ["ticker", "target_price", "current_price", "direction", "notes", "created_at", "status"]
         for col in expected_cols:
             if col not in df.columns:
