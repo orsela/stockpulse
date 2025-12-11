@@ -103,7 +103,7 @@ def get_market_status():
                 delta = ((price - prev_close) / prev_close) * 100
             else:
                 delta = 0.0
-            
+             
             try: price = float(price) 
             except: price = 0.0
             if math.isnan(price): price = 0.0
@@ -236,37 +236,58 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FINAL FIXES)
+# 5. UI & CSS (UPDATED WITH FIX)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
 
-        /* --- DASHBOARD GRID --- */
-        .market-grid { 
-            display: grid; 
-            grid-template-columns: repeat(2, 1fr); 
-            gap: 12px; 
-            margin-bottom: 20px; 
+        /* --- NEW DASHBOARD STYLE (Compact Rows) --- */
+        .dashboard-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px; /* Minimal gap between rows */
+            margin-bottom: 20px;
         }
-        @media(min-width:640px){ .market-grid { grid-template-columns:repeat(4,1fr); gap:16px; }}
-        
+
         .market-card { 
             background: #1a1a1a;
-            border-radius: 12px; 
-            padding: 12px; 
-            text-align: center; 
-            /* Default subtle border */
             border: 1px solid #333;
-            transition: all 0.3s ease;
+            border-radius: 8px; 
+            padding: 8px 12px; /* Compressed padding */
+            
+            /* The key to horizontal layout on all screens */
+            display: flex;
+            flex-direction: row; 
+            justify-content: space-between;
+            align-items: center;
+            
+            margin: 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
         
-        .market-title { font-size: 0.8rem; color: #aaa; letter-spacing: 1px; text-transform: uppercase; }
-        .market-value { font-size: 1.4rem; font-weight: 800; color: #fff; margin: 4px 0; }
-        .market-delta { font-size: 0.9rem; font-weight: bold; }
+        /* New Font Styles for Horizontal Card */
+        .market-title { 
+            font-size: 0.9rem; 
+            color: #fff; 
+            font-weight: bold;
+            flex: 1;
+        }
+        .market-value { 
+            font-size: 0.9rem; 
+            color: #ccc; 
+            font-family: monospace;
+            margin: 0 10px;
+        }
+        .market-delta { 
+            font-size: 0.9rem; 
+            font-weight: bold;
+            min-width: 60px;
+            text-align: right;
+        }
 
-        /* --- TABLE FIXES (ZERO TOLERANCE) --- */
+        /* --- TABLE FIXES (ZERO TOLERANCE - Preserved) --- */
         
         /* 1. Force Horizontal Flow */
         div[data-testid="stHorizontalBlock"] {
@@ -334,10 +355,13 @@ def main():
     with c1: st.markdown("<h3 style='margin:0; color:#FFC107;'>StockPulse</h3>", unsafe_allow_html=True)
     with c2: st.markdown(f"<div style='text-align:right;color:#888;padding-top:8px;'>{datetime.now():%H:%M}</div>", unsafe_allow_html=True)
 
-    # --- DASHBOARD WITH GLOWING SHADOWS ---
+    # --- DASHBOARD (UPDATED: FIXED HTML + CSS) ---
     market_data = get_market_status()
     metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
-    cards_html = ""
+    
+    # We build a flex container string
+    cards_html = '<div class="dashboard-container">'
+    
     for label, key in metrics:
         v, d = market_data[key]
         vs = "—" if v==0 else f"{v:,.0f}" if key!="VIX" else f"{v:.2f}"
@@ -346,25 +370,25 @@ def main():
         # Color Logic
         is_up = True
         if key == "VIX": 
-            is_up = False if d >= 0 else True # Vix up is bad (Red)
+            is_up = False if d >= 0 else True 
         else:
             is_up = True if d >= 0 else False
             
         col = "#00E676" if is_up else "#FF4B4B"
         
-        # Dynamic Shadow Style
-        shadow_col = "rgba(0, 230, 118, 0.25)" if is_up else "rgba(255, 75, 75, 0.25)"
-        border_style = f"border: 1px solid {col}; box-shadow: 0 0 15px {shadow_col};"
-
+        # New Horizontal Card HTML Structure
         cards_html += f"""
-        <div class="market-card" style="{border_style}">
+        <div class="market-card" style="border-left: 4px solid {col};">
             <div class="market-title">{label}</div>
             <div class="market-value">{vs}</div>
             <div class="market-delta" style="color:{col}">{ds}</div>
         </div>
         """
     
-    st.markdown(f'<div class="market-grid">{cards_html}</div>', unsafe_allow_html=True)
+    cards_html += '</div>'
+    
+    # Render with HTML enabled
+    st.markdown(cards_html, unsafe_allow_html=True)
 
     # --- SETTINGS ---
     with st.expander("⚙️ Connection", expanded=False):
