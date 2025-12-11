@@ -94,30 +94,23 @@ def get_market_status():
     for name, symbol in tickers.items():
         try:
             ticker = yf.Ticker(symbol)
-            # Fetch 5 days to ensure we have valid history even after weekends/holidays
             hist = ticker.history(period="5d")
             
             if hist.empty:
                  results[name] = (0.0, 0.0)
                  continue
 
-            # Get the absolute last valid closing price
             price = hist['Close'].iloc[-1]
-            
-            # Calculate change
-            # We look for the previous valid close
             if len(hist) >= 2:
                 prev_close = hist['Close'].iloc[-2]
                 delta = ((price - prev_close) / prev_close) * 100
             else:
                 delta = 0.0
 
-            # CLEANUP: Ensure no NaNs propagate to the UI
             if pd.isna(price) or np.isnan(price): price = 0.0
             if pd.isna(delta) or np.isnan(delta): delta = 0.0
 
             results[name] = (price, delta)
-
         except Exception as e:
             results[name] = (0.0, 0.0)
             
@@ -265,7 +258,6 @@ def apply_custom_ui():
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
         
-        /* High Contrast Inputs */
         div[data-baseweb="input"] > div, 
         div[data-baseweb="select"] > div, 
         div[data-testid="stNumberInput"] div[data-baseweb="input"] > div {
@@ -277,7 +269,6 @@ def apply_custom_ui():
         div[data-baseweb="select"] span { color: #ffffff !important; }
         label { color: #ffc107 !important; font-weight: bold !important; }
 
-        /* Dashboard Metrics - FIXED CONTRAST */
         div[data-testid="metric-container"] {
             background-color: #1c1c1e;
             border: 1px solid #333;
@@ -290,28 +281,45 @@ def apply_custom_ui():
             font-weight: bold;
         }
         
-        /* Alert Cards */
         .sticky-note { 
             background: #F9E79F; 
             color: #000 !important; 
             padding: 10px; 
             border-radius: 8px; 
-            margin-bottom: 10px; 
+            margin-bottom: 5px; 
             box-shadow: 2px 2px 10px rgba(0,0,0,0.5); 
         }
         .sticky-note b, .sticky-note span, .sticky-note small { color: #000000 !important; }
 
-        /* Buttons */
+        /* Table Styling */
+        .table-row {
+            background-color: #262730;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 3px solid #FFC107;
+            margin-bottom: 5px;
+        }
+
         button[kind="primary"] { background-color: #FF4B4B !important; color: white !important; border: none; }
         
-        /* High Contrast Icon Button (Delete) */
-        button[kind="secondary"].delete-button {
-            background-color: #FF4B4B !important;
-            color: white !important;
-            border: none !important;
-            font-size: 1.2rem !important;
+        /* Compact Buttons for Table/Card Actions */
+        button[kind="secondary"].action-btn {
+            background-color: #333 !important;
+            color: #fff !important;
+            border: 1px solid #555 !important;
+            padding: 2px 8px !important;
+            min-height: 0px !important;
+            height: 35px !important;
         }
-        button[kind="secondary"] { border: 1px solid #555 !important; color: #eee !important; }
+        button[kind="secondary"].delete-btn {
+            background-color: #333 !important;
+            color: #FF4B4B !important;
+            border: 1px solid #555 !important;
+            padding: 2px 8px !important;
+            min-height: 0px !important;
+            height: 35px !important;
+        }
+
     </style>
     """, unsafe_allow_html=True)
 
@@ -335,12 +343,10 @@ def main():
     with c_title:
         st.markdown("<h1 style='text-align: left; margin:0; color: #FFC107;'>⚡ StockPulse Terminal</h1>", unsafe_allow_html=True)
     with c_time:
-        # תצוגה בולטת של זמן עדכון בצד ימין למעלה
-        current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        current_time = datetime.now().strftime("%d/%m %H:%M")
         st.markdown(f"""
-        <div style="text-align: right; background-color: #1c1c1e; padding: 10px; border-radius: 8px; border: 1px solid #333;">
-            <small style="color: #aaa;">DATA UPDATED:</small><br>
-            <span style="color: #4CAF50; font-weight: bold; font-family: monospace;">{current_time}</span>
+        <div style="text-align: right; padding-top:10px;">
+            <small style="color: #aaa;">UPDATED: <span style="color: #4CAF50;">{current_time}</span></small>
         </div>
         """, unsafe_allow_html=True)
 
@@ -349,15 +355,11 @@ def main():
         st.markdown("### 🌍 Market Status")
         m_cols = st.columns(4)
         market_data = get_market_status()
-        
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
         for i, (label, key) in enumerate(metrics):
             val, delta = market_data[key]
-            
-            # בדיקת נתונים ריקים לתצוגה
             display_val = f"{val:,.2f}" if val != 0 else "N/A"
             display_delta = f"{delta:.2f}%" if val != 0 else "0.00%"
-            
             with m_cols[i]:
                 st.metric(label=label, value=display_val, delta=display_delta)
         st.markdown("---")
@@ -367,7 +369,6 @@ def main():
         c1, c2 = st.columns(2)
         with c1: st.text_input("Email", key="temp_email", value=st.session_state.user_email)
         with c2: st.text_input("WhatsApp", key="temp_phone", value=st.session_state.user_phone)
-        
         if st.button("Save Connection Settings", type="primary"):
             st.session_state.user_email = st.session_state.temp_email
             st.session_state.user_phone = st.session_state.temp_phone
@@ -388,53 +389,94 @@ def main():
         active_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
         
         with col_list:
+            # VIEW MODE TOGGLE
+            view_mode = st.radio("Display View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
+            
             if not active_view.empty:
-                for idx, row in active_view.iterrows():
-                    st.markdown(f"""
-                    <div class="sticky-note">
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="font-size:1.2em; font-weight:bold;">{row['ticker']}</span> 
-                            <span style="font-weight:bold;">Target: ${float(row['target_price']):.2f}</span>
-                        </div>
-                        <div style="font-size:0.9em;">
-                             Current: ${float(row['current_price']):.2f} | {row['direction']} | {row['notes']}
-                        </div>
-                    </div>""", unsafe_allow_html=True)
+                # --- TABLE VIEW LOGIC ---
+                if view_mode == "📄 Table":
+                    # Table Header
+                    h1, h2, h3, h4 = st.columns([1.5, 1.5, 1.5, 1.5])
+                    h1.markdown("**Ticker**")
+                    h2.markdown("**Target**")
+                    h3.markdown("**Current**")
+                    h4.markdown("**Actions**")
+                    st.markdown("<hr style='margin: 5px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
-                    b1, b2 = st.columns([1, 4])
-                    with b1:
-                        if st.button(f"✏️", key=f"edit_{idx}", help="Edit this alert"):
-                            st.session_state.edit_ticker = row['ticker']
-                            st.session_state.edit_price = float(row['target_price'])
-                            st.session_state.edit_note = row['notes']
-                            st.session_state.alert_db.drop(idx, inplace=True)
-                            st.session_state.alert_db.reset_index(drop=True, inplace=True)
-                            sync_db(st.session_state.alert_db)
-                            st.rerun()
-                    with b2:
-                        if st.button(f"🗑️", key=f"del_{idx}", help="Delete", type="secondary", args=("delete-button",)):
-                            st.session_state.alert_db.drop(idx, inplace=True)
-                            st.session_state.alert_db.reset_index(drop=True, inplace=True)
-                            sync_db(st.session_state.alert_db)
-                            st.rerun()
+                    for idx, row in active_view.iterrows():
+                        c1, c2, c3, c4 = st.columns([1.5, 1.5, 1.5, 1.5])
+                        with c1: st.markdown(f"**{row['ticker']}**")
+                        with c2: st.markdown(f"${float(row['target_price']):.2f} ({row['direction']})")
+                        with c3: st.markdown(f"${float(row['current_price']):.2f}")
+                        with c4:
+                            # Attached Buttons
+                            b_edit, b_del = st.columns([1, 1])
+                            with b_edit:
+                                if st.button("✏️", key=f"tbl_ed_{idx}", help="Edit"):
+                                    st.session_state.edit_ticker = row['ticker']
+                                    st.session_state.edit_price = float(row['target_price'])
+                                    st.session_state.edit_note = row['notes']
+                                    st.session_state.alert_db.drop(idx, inplace=True)
+                                    st.session_state.alert_db.reset_index(drop=True, inplace=True)
+                                    sync_db(st.session_state.alert_db)
+                                    st.rerun()
+                            with b_del:
+                                if st.button("🗑️", key=f"tbl_del_{idx}", help="Delete"):
+                                    st.session_state.alert_db.drop(idx, inplace=True)
+                                    st.session_state.alert_db.reset_index(drop=True, inplace=True)
+                                    sync_db(st.session_state.alert_db)
+                                    st.rerun()
+                        st.markdown("<hr style='margin: 5px 0; border-color: #333;'>", unsafe_allow_html=True)
+
+                # --- CARD VIEW LOGIC ---
+                else:
+                    for idx, row in active_view.iterrows():
+                        st.markdown(f"""
+                        <div class="sticky-note">
+                            <div style="display:flex; justify-content:space-between;">
+                                <span style="font-size:1.1em; font-weight:bold;">{row['ticker']}</span> 
+                                <span style="font-weight:bold;">Target: ${float(row['target_price']):.2f}</span>
+                            </div>
+                            <div style="font-size:0.9em; margin-top:5px;">
+                                 Curr: ${float(row['current_price']):.2f} | {row['direction']} | {row['notes']}
+                            </div>
+                        </div>""", unsafe_allow_html=True)
+                        
+                        # Attached Buttons below card
+                        bc1, bc2, bc3 = st.columns([1, 1, 6])
+                        with bc1:
+                            if st.button("✏️", key=f"crd_ed_{idx}"):
+                                st.session_state.edit_ticker = row['ticker']
+                                st.session_state.edit_price = float(row['target_price'])
+                                st.session_state.edit_note = row['notes']
+                                st.session_state.alert_db.drop(idx, inplace=True)
+                                st.session_state.alert_db.reset_index(drop=True, inplace=True)
+                                sync_db(st.session_state.alert_db)
+                                st.rerun()
+                        with bc2:
+                            if st.button("🗑️", key=f"crd_del_{idx}"):
+                                st.session_state.alert_db.drop(idx, inplace=True)
+                                st.session_state.alert_db.reset_index(drop=True, inplace=True)
+                                sync_db(st.session_state.alert_db)
+                                st.rerun()
             else:
                 st.info("No active alerts.")
 
         with col_add:
-            st.markdown("### ➕ Add / Edit Alert")
+            st.markdown("### ➕ Add / Edit")
             with st.form("add_alert"):
                 def_t = st.session_state.edit_ticker if st.session_state.edit_ticker else ""
                 def_p = st.session_state.edit_price if st.session_state.edit_price else 0.0
                 def_n = st.session_state.edit_note if st.session_state.edit_note else ""
 
                 t = st.text_input("Ticker", value=def_t).upper()
-                p = st.number_input("Target Price", min_value=0.0, value=def_p, step=0.1)
-                d = st.selectbox("Direction", ["Up", "Down"])
-                n = st.text_input("Notes", value=def_n)
+                p = st.number_input("Target", min_value=0.0, value=def_p, step=0.1)
+                d = st.selectbox("Dir", ["Up", "Down"])
+                n = st.text_input("Note", value=def_n)
                 
                 if st.form_submit_button("Save Alert", type="primary"):
                     if is_duplicate_alert(t, p, d):
-                        st.error("⚠️ Alert already exists!")
+                        st.error("Exists!")
                     else:
                         new = {
                             "ticker": t, "target_price": p, "current_price": 0.0, 
