@@ -12,7 +12,7 @@ import math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import numpy as np 
-import textwrap # נועד לנקות את הרווחים מה-HTML
+import textwrap # קריטי לתיקון תצוגת ה-HTML
 
 # ==========================================
 # 0. CONFIGURATION & SECRETS
@@ -249,7 +249,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FIXED)
+# 5. UI & CSS (FINAL FIXES)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -259,7 +259,7 @@ def apply_custom_ui():
         /* --- DASHBOARD GRID CSS --- */
         .dashboard-container {
             display: grid;
-            grid-template-columns: 1fr 1fr; /* Force 2 columns */
+            grid-template-columns: 1fr 1fr;
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -286,19 +286,19 @@ def apply_custom_ui():
             font-weight: bold;
         }
 
-        /* --- MOBILE TABLE FIX (NO STACKING) --- */
+        /* --- MOBILE TABLE FIX (NO STACKING - FORCE ROW) --- */
         @media (max-width: 640px) {
-            /* Force horizontal layout for columns even on mobile */
+            /* Force Streamlit column container to stay horizontal */
             div[data-testid="stHorizontalBlock"] {
                 flex-direction: row !important;
                 flex-wrap: nowrap !important;
-                overflow-x: auto !important; /* Allow scroll if too tight */
+                gap: 2px !important;
             }
+            /* Allow columns to shrink infinitely to fit */
             div[data-testid="column"] {
-                flex: 1 0 auto !important; /* Do not shrink to zero */
+                flex: 1 1 auto !important;
+                min-width: 0px !important; 
                 width: auto !important;
-                min-width: 50px !important;
-                padding: 0 2px !important;
             }
         }
 
@@ -358,16 +358,15 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- DASHBOARD (FIXED INDENTATION & LAYOUT) ---
+    # --- DASHBOARD (FIXED WITH TEXTWRAP) ---
     with st.container():
         st.markdown("### 🌍 Market")
         
         market_data = get_market_status()
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
         
-        # We construct the HTML string CAREFULLY using textwrap.dedent
-        # to ensure no whitespace issues causing code-block rendering.
-        cards_html = ""
+        # Using a list to build HTML avoids indentation pitfalls
+        cards = []
         for label, key in metrics:
             val, delta = market_data[key]
             
@@ -382,21 +381,23 @@ def main():
                 if delta < 0: color_delta = "#FF4B4B" # Red
                 if key == "VIX": color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50"
 
-            cards_html += f"""
+            card_html = f"""
             <div class="dashboard-card">
                 <div class="dashboard-title">{label}</div>
                 <div class="dashboard-value">{display_val}</div>
                 <div style="color: {color_delta};" class="dashboard-delta">{display_delta}</div>
             </div>
             """
+            cards.append(card_html)
         
-        # Wrap in container
+        # Combine into the Grid Container
         final_html = f"""
         <div class="dashboard-container">
-            {cards_html}
+            {''.join(cards)}
         </div>
         """
         
+        # textwrap.dedent cleans up any accidental leading spaces
         st.markdown(textwrap.dedent(final_html), unsafe_allow_html=True)
         st.markdown("---")
 
@@ -431,7 +432,8 @@ def main():
                 # --- TABLE VIEW ---
                 if view_mode == "📄 Table":
                     # Headers
-                    h1, h2, h3, h4 = st.columns([1, 1, 1, 0.9]) 
+                    # Ratio: 1.2 | 1.2 | 1.2 | 1.0 (Actions smaller)
+                    h1, h2, h3, h4 = st.columns([1.2, 1.2, 1.2, 1.0]) 
                     h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
                     h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
                     h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
@@ -439,7 +441,8 @@ def main():
                     st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        c1, c2, c3, c4 = st.columns([1, 1, 1, 0.9])
+                        # Rows
+                        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.0])
                         
                         with c1: st.markdown(f"<div class='compact-text' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
                         with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
