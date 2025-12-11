@@ -10,6 +10,7 @@ import re
 import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import numpy as np 
 
 # ==========================================
 # 0. CONFIGURATION & SECRETS
@@ -86,29 +87,44 @@ def is_duplicate_alert(ticker, target, direction):
     except: return False
 
 def get_market_status():
-    """מושך נתוני מדדים בזמן אמת עבור הדשבורד"""
+    """Fetches market data, handling NaNs and market closures"""
     tickers = {'S&P 500': '^GSPC', 'Nasdaq': '^IXIC', 'VIX': '^VIX', 'Bitcoin': 'BTC-USD'}
-    try:
-        data = yf.download(list(tickers.values()), period="1d", progress=False)['Close']
-        results = {}
-        for name, symbol in tickers.items():
-            try:
-                # טיפול בפורמטים שונים של yfinance
-                if len(tickers) == 1: price = data.iloc[-1].item()
-                else: price = data[symbol].iloc[-1]
-                
-                # חישוב שינוי יומי (פשוט להמחשה, אפשר לשכלל)
-                open_price = yf.Ticker(symbol).history(period='1d')['Open'].iloc[-1]
-                delta = ((price - open_price) / open_price) * 100
-                results[name] = (price, delta)
-            except:
-                results[name] = (0.0, 0.0)
-        return results
-    except:
-        return {k: (0.0, 0.0) for k in tickers}
+    results = {}
+    
+    for name, symbol in tickers.items():
+        try:
+            ticker = yf.Ticker(symbol)
+            # Fetch 5 days to ensure we have valid history even after weekends/holidays
+            hist = ticker.history(period="5d")
+            
+            if hist.empty:
+                 results[name] = (0.0, 0.0)
+                 continue
+
+            # Get the absolute last valid closing price
+            price = hist['Close'].iloc[-1]
+            
+            # Calculate change
+            # We look for the previous valid close
+            if len(hist) >= 2:
+                prev_close = hist['Close'].iloc[-2]
+                delta = ((price - prev_close) / prev_close) * 100
+            else:
+                delta = 0.0
+
+            # CLEANUP: Ensure no NaNs propagate to the UI
+            if pd.isna(price) or np.isnan(price): price = 0.0
+            if pd.isna(delta) or np.isnan(delta): delta = 0.0
+
+            results[name] = (price, delta)
+
+        except Exception as e:
+            results[name] = (0.0, 0.0)
+            
+    return results
 
 # ==========================================
-# 3. ANALYSIS FUNCTIONS (Smart SL)
+# 3. ANALYSIS FUNCTIONS
 # ==========================================
 def calculate_smart_sl(ticker, buy_price):
     try:
@@ -151,7 +167,7 @@ def calculate_smart_sl(ticker, buy_price):
     except Exception as e: return None, str(e)
 
 # ==========================================
-# 4. NOTIFICATIONS & PROCESSING
+# 4. NOTIFICATIONS
 # ==========================================
 def send_email_alert(to_email, ticker, current_price, target_price, direction, notes):
     if not SENDER_EMAIL or not SENDER_PASSWORD: return False, "Secrets missing"
@@ -242,16 +258,14 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FIXED HIGH CONTRAST)
+# 5. UI & CSS
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
-        /* Base App Styling */
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
         
-        /* FIX 1: HIGH CONTRAST INPUTS */
-        /* Targets Text Input, Number Input, Selectbox */
+        /* High Contrast Inputs */
         div[data-baseweb="input"] > div, 
         div[data-baseweb="select"] > div, 
         div[data-testid="stNumberInput"] div[data-baseweb="input"] > div {
@@ -259,28 +273,21 @@ def apply_custom_ui():
             color: #ffffff !important;
             border: 1px solid #555 !important;
         }
-        /* Input Text Color */
-        input[type="text"], input[type="number"] {
-            color: #ffffff !important;
-            caret-color: #ffffff !important; /* The typing cursor */
-        }
-        /* Dropdown Text Color */
-        div[data-baseweb="select"] span {
-            color: #ffffff !important;
-        }
-        /* Labels */
-        label {
-            color: #ffc107 !important;
-            font-weight: bold !important;
-        }
+        input[type="text"], input[type="number"] { color: #ffffff !important; caret-color: #ffffff !important; }
+        div[data-baseweb="select"] span { color: #ffffff !important; }
+        label { color: #ffc107 !important; font-weight: bold !important; }
 
-        /* Dashboard Metrics */
-        .metric-card {
+        /* Dashboard Metrics - FIXED CONTRAST */
+        div[data-testid="metric-container"] {
             background-color: #1c1c1e;
             border: 1px solid #333;
             border-radius: 8px;
             padding: 15px;
-            text-align: center;
+            color: #ffffff;
+        }
+        div[data-testid="metric-container"] > div:nth-child(2) {
+            color: #FFC107 !important;
+            font-weight: bold;
         }
         
         /* Alert Cards */
@@ -292,21 +299,19 @@ def apply_custom_ui():
             margin-bottom: 10px; 
             box-shadow: 2px 2px 10px rgba(0,0,0,0.5); 
         }
-        /* Fix text inside sticky note (black text on yellow) */
-        .sticky-note b, .sticky-note span, .sticky-note small {
-            color: #000000 !important;
-        }
+        .sticky-note b, .sticky-note span, .sticky-note small { color: #000000 !important; }
 
         /* Buttons */
-        button[kind="primary"] {
+        button[kind="primary"] { background-color: #FF4B4B !important; color: white !important; border: none; }
+        
+        /* High Contrast Icon Button (Delete) */
+        button[kind="secondary"].delete-button {
             background-color: #FF4B4B !important;
             color: white !important;
-            border: none;
+            border: none !important;
+            font-size: 1.2rem !important;
         }
-        button[kind="secondary"] {
-            border: 1px solid #555 !important;
-            color: #eee !important;
-        }
+        button[kind="secondary"] { border: 1px solid #555 !important; color: #eee !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -316,20 +321,30 @@ def apply_custom_ui():
 def main():
     apply_custom_ui()
     
-    # Init State
     if 'user_email' not in st.session_state: st.session_state.user_email = ""
     if 'user_phone' not in st.session_state: st.session_state.user_phone = ""
     if 'processed_msgs' not in st.session_state: st.session_state.processed_msgs = set()
     if 'alert_db' not in st.session_state: st.session_state.alert_db = load_data_from_db()
     
-    # State for Editing
     if 'edit_ticker' not in st.session_state: st.session_state.edit_ticker = ""
     if 'edit_price' not in st.session_state: st.session_state.edit_price = 0.0
     if 'edit_note' not in st.session_state: st.session_state.edit_note = ""
 
-    st.markdown("<h1 style='text-align: center; color: #FFC107;'>⚡ StockPulse Terminal</h1>", unsafe_allow_html=True)
+    # --- HEADER WITH TIMESTAMP ---
+    c_title, c_time = st.columns([3, 1])
+    with c_title:
+        st.markdown("<h1 style='text-align: left; margin:0; color: #FFC107;'>⚡ StockPulse Terminal</h1>", unsafe_allow_html=True)
+    with c_time:
+        # תצוגה בולטת של זמן עדכון בצד ימין למעלה
+        current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        st.markdown(f"""
+        <div style="text-align: right; background-color: #1c1c1e; padding: 10px; border-radius: 8px; border: 1px solid #333;">
+            <small style="color: #aaa;">DATA UPDATED:</small><br>
+            <span style="color: #4CAF50; font-weight: bold; font-family: monospace;">{current_time}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # --- 4. MARKET DASHBOARD (RESTORED) ---
+    # --- 4. MARKET DASHBOARD ---
     with st.container():
         st.markdown("### 🌍 Market Status")
         m_cols = st.columns(4)
@@ -338,9 +353,13 @@ def main():
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
         for i, (label, key) in enumerate(metrics):
             val, delta = market_data[key]
-            color = "normal" if key == "VIX" else ("inverse" if delta < 0 else "normal") # VIX acts opposite usually, but keeping simple
+            
+            # בדיקת נתונים ריקים לתצוגה
+            display_val = f"{val:,.2f}" if val != 0 else "N/A"
+            display_delta = f"{delta:.2f}%" if val != 0 else "0.00%"
+            
             with m_cols[i]:
-                st.metric(label=label, value=f"{val:,.2f}", delta=f"{delta:.2f}%")
+                st.metric(label=label, value=display_val, delta=display_delta)
         st.markdown("---")
 
     # --- SETTINGS ---
@@ -349,7 +368,6 @@ def main():
         with c1: st.text_input("Email", key="temp_email", value=st.session_state.user_email)
         with c2: st.text_input("WhatsApp", key="temp_phone", value=st.session_state.user_phone)
         
-        # FIX 5: Primary Button for Visibility
         if st.button("Save Connection Settings", type="primary"):
             st.session_state.user_email = st.session_state.temp_email
             st.session_state.user_phone = st.session_state.temp_phone
@@ -372,7 +390,6 @@ def main():
         with col_list:
             if not active_view.empty:
                 for idx, row in active_view.iterrows():
-                    # Card UI
                     st.markdown(f"""
                     <div class="sticky-note">
                         <div style="display:flex; justify-content:space-between;">
@@ -384,21 +401,18 @@ def main():
                         </div>
                     </div>""", unsafe_allow_html=True)
                     
-                    # FIX 2: Edit & Delete Buttons
                     b1, b2 = st.columns([1, 4])
                     with b1:
                         if st.button(f"✏️", key=f"edit_{idx}", help="Edit this alert"):
                             st.session_state.edit_ticker = row['ticker']
                             st.session_state.edit_price = float(row['target_price'])
                             st.session_state.edit_note = row['notes']
-                            # Remove old one so we don't duplicate
                             st.session_state.alert_db.drop(idx, inplace=True)
                             st.session_state.alert_db.reset_index(drop=True, inplace=True)
                             sync_db(st.session_state.alert_db)
-                            st.toast(f"Editing {row['ticker']}... Check the form on the right.")
                             st.rerun()
                     with b2:
-                        if st.button(f"🗑️ Delete", key=f"del_{idx}"):
+                        if st.button(f"🗑️", key=f"del_{idx}", help="Delete", type="secondary", args=("delete-button",)):
                             st.session_state.alert_db.drop(idx, inplace=True)
                             st.session_state.alert_db.reset_index(drop=True, inplace=True)
                             sync_db(st.session_state.alert_db)
@@ -409,7 +423,6 @@ def main():
         with col_add:
             st.markdown("### ➕ Add / Edit Alert")
             with st.form("add_alert"):
-                # Pre-fill if editing
                 def_t = st.session_state.edit_ticker if st.session_state.edit_ticker else ""
                 def_p = st.session_state.edit_price if st.session_state.edit_price else 0.0
                 def_n = st.session_state.edit_note if st.session_state.edit_note else ""
@@ -430,7 +443,6 @@ def main():
                         }
                         st.session_state.alert_db = pd.concat([st.session_state.alert_db, pd.DataFrame([new])], ignore_index=True)
                         sync_db(st.session_state.alert_db)
-                        # Clear edit state
                         st.session_state.edit_ticker = ""
                         st.session_state.edit_price = 0.0
                         st.session_state.edit_note = ""
@@ -441,19 +453,16 @@ def main():
     with tab_calc:
         st.markdown("### 🧠 AI Stop-Loss")
         
-        # FIX 3: Slider Implementation
-        calc_ticker = st.text_input("Stock Ticker", placeholder="Enter Ticker (e.g. NVDA) to load price...").upper()
+        calc_ticker = st.text_input("Stock Ticker", placeholder="Enter Ticker...").upper()
         
         current_val = 0.0
         if calc_ticker:
             try:
-                # Get current price quickly for slider default
                 data = yf.Ticker(calc_ticker).history(period='1d')['Close']
                 if not data.empty:
                     current_val = float(data.iloc[-1])
             except: pass
         
-        # Slider setup: Max range is 2x current price, default is current price
         max_rng = current_val * 2 if current_val > 0 else 1000.0
         val_default = current_val if current_val > 0 else 0.0
         
