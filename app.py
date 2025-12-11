@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -12,22 +11,22 @@ import time
 import math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import numpy as np
+import numpy as np 
 
 # ==========================================
 # 0. CONFIGURATION & SECRETS
 # ==========================================
-st.set_page_config(page_title="StockPulse", page_icon="Lightning", layout="wide")
+st.set_page_config(page_title="StockPulse", page_icon="⚡", layout="wide")
 
 try:
-    SENDER_EMAIL = st.secrets["SENDER_EMAIL"]
-    SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
-    TWILIO_SID = st.secrets["TWILIO_ACCOUNT_SID"]
-    TWILIO_TOKEN = st.secrets["TWILIO_AUTH_TOKEN"]
-    TWILIO_FROM = st.secrets["TWILIO_PHONE_NUMBER"]
+    SENDER_EMAIL = st.secrets.get("SENDER_EMAIL", "")
+    SENDER_PASSWORD = st.secrets.get("SENDER_PASSWORD", "")
+    TWILIO_SID = st.secrets.get("TWILIO_ACCOUNT_SID", "")
+    TWILIO_TOKEN = st.secrets.get("TWILIO_AUTH_TOKEN", "")
+    TWILIO_FROM = st.secrets.get("TWILIO_PHONE_NUMBER", "")
     GCP_SECRETS = st.secrets["gcp_service_account"]
 except Exception:
-    st.error("Error loading secrets. Check secrets.toml")
+    st.error("❌ Error loading secrets. Please check your secrets.toml file.")
     st.stop()
 
 SMTP_SERVER = "smtp.gmail.com"
@@ -45,7 +44,7 @@ def get_db_connection():
         sheet = client.open_by_key(SHEET_ID).sheet1
         return sheet
     except Exception as e:
-        st.error(f"DB Connection Error: {e}")
+        st.error(f"❌ Database Connection Error: {e}")
         return None
 
 def load_data_from_db():
@@ -54,12 +53,13 @@ def load_data_from_db():
     try:
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
-        expected = ["ticker","target_price","current_price","direction","notes","created_at","status","triggered_at"]
-        for col in expected:
+        expected_cols = ["ticker", "target_price", "current_price", "direction", "notes", "created_at", "status", "triggered_at"]
+        if df.empty: return pd.DataFrame(columns=expected_cols)
+        for col in expected_cols:
             if col not in df.columns: df[col] = ""
         return df
-    except:
-        return pd.DataFrame(columns=expected)
+    except Exception as e:
+        return pd.DataFrame(columns=["ticker", "target_price", "current_price", "direction", "notes", "created_at", "status", "triggered_at"])
 
 def sync_db(df):
     sheet = get_db_connection()
@@ -69,37 +69,52 @@ def sync_db(df):
         sheet.clear()
         sheet.update([df_save.columns.values.tolist()] + df_save.values.tolist())
     except Exception as e:
-        st.error(f"Save Error: {e}")
+        st.error(f"Error saving to DB: {e}")
 
 # ==========================================
 # 2. LOGIC HELPERS
 # ==========================================
 def is_duplicate_alert(ticker, target, direction):
     if st.session_state.alert_db.empty: return False
-    active = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
-    if active.empty: return False
+    active_mask = st.session_state.alert_db['status'] == 'Active'
+    df_active = st.session_state.alert_db[active_mask]
+    if df_active.empty: return False
     try:
-        dup = active[(active['ticker'] == ticker) & 
-                     (active['target_price'].astype(float) == float(target)) & 
-                     (active['direction'] == direction)]
-        return not dup.empty
-    except:
-        return False
+        target_float = float(target)
+        check_df = df_active.copy()
+        check_df['target_float'] = pd.to_numeric(check_df['target_price'], errors='coerce')
+        duplicate = check_df[(check_df['ticker'] == ticker) & (check_df['target_float'] == target_float) & (check_df['direction'] == direction)]
+        return not duplicate.empty
+    except: return False
 
 def get_market_status():
     tickers = {'S&P 500': '^GSPC', 'Nasdaq': '^IXIC', 'VIX': '^VIX', 'Bitcoin': 'BTC-USD'}
     results = {}
     for name, symbol in tickers.items():
         try:
-            t = yf.Ticker(symbol)
-            hist = t.history(period="5d")
-            if hist.empty or len(hist) < 2:
-                results[name] = (0.0, 0.0); continue
-            price = float(hist['Close'].iloc[-1])
-            prev = float(hist['Close'].iloc[-2])
-            delta = (price - prev) / prev * 100
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period="5d")
+            if hist.empty:
+                 results[name] = (0.0, 0.0)
+                 continue
+            price = hist['Close'].iloc[-1]
+            if len(hist) >= 2:
+                prev_close = hist['Close'].iloc[-2]
+                delta = ((price - prev_close) / prev_close) * 100
+            else:
+                delta = 0.0
+            
+            # Safe Float Conversion
+            try: price = float(price) 
+            except: price = 0.0
+            if math.isnan(price): price = 0.0
+            
+            try: delta = float(delta) 
+            except: delta = 0.0
+            if math.isnan(delta): delta = 0.0
+
             results[name] = (price, delta)
-        except:
+        except Exception as e:
             results[name] = (0.0, 0.0)
     return results
 
@@ -110,334 +125,457 @@ def calculate_smart_sl(ticker, buy_price):
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="1y")
-        if len(hist) < 150: return None, "Not enough data"
-        hist['MA150'] = hist['Close'].rolling(150).mean()
-        tr = pd.concat([
-            hist['High'] - hist['Low'],
-            (hist['High'] - hist['Close'].shift()).abs(),
-            (hist['Low'] - hist['Close'].shift()).abs()
-        ], axis=1).max(axis=1)
-        hist['ATR'] = tr.rolling(14).mean()
+        if len(hist) < 150: return None, "Not enough data for MA150"
+        hist['MA150'] = hist['Close'].rolling(window=150).mean()
+        high_low = hist['High'] - hist['Low']
+        high_close = (hist['High'] - hist['Close'].shift()).abs()
+        low_close = (hist['Low'] - hist['Close'].shift()).abs()
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        hist['ATR'] = tr.rolling(window=14).mean()
         latest = hist.iloc[-1]
-        ma150, atr = latest['MA150'], latest['ATR']
-        curr = latest['Close']
-        entry = buy_price if buy_price > 0 else curr
+        ma150 = latest['MA150']
+        atr = latest['ATR']
+        curr_price = latest['Close']
+        entry = buy_price if buy_price > 0 else curr_price
+        
+        sl_atr = entry - (2 * atr)
+        final_sl = sl_atr
+        reason = "Volatility (2x ATR)"
+        
+        sl_max_loss = entry * 0.88
+        if final_sl < sl_max_loss:
+            final_sl = sl_max_loss
+            reason = "Max Loss Limit (12%)"
+            
+        if curr_price > ma150 and final_sl < ma150:
+            final_sl = ma150
+            reason = "MA150 Support Rule"
+        
+        if final_sl >= curr_price:
+            final_sl = curr_price * 0.99
+            reason = "Immediate Exit (Price violated rules)"
 
-        sl = entry - 2*atr
-        reason = "2×ATR"
+        trend = "UP 🟢" if curr_price > ma150 else "DOWN 🔴"
+        return {"ma150": ma150, "atr": atr, "trend": trend, "sl_price": final_sl, "current_price": curr_price, "reason": reason, "entry": entry}, None
+    except Exception as e: return None, str(e)
 
-        if sl < entry * 0.88:
-            sl = entry * 0.88
-            reason = "Max 12% Loss"
-        if curr > ma150 and sl < ma150:
-            sl = ma150
-            reason = "MA150 Support"
-        if sl >= curr:
-            sl = curr * 0.99
-            reason = "Immediate Exit"
-
-        trend = "UP" if curr > ma150 else "DOWN"
-        return {"ma150": ma150, "atr": atr, "trend": trend, "sl_price": sl,
-                "current_price": curr, "reason": reason, "entry": entry}, None
-    except Exception as e:
-        return None, str(e)
-
-def send_email_alert(to_email, ticker, price, target, direction, notes):
-    if not SENDER_EMAIL: return False, "No email"
+def send_email_alert(to_email, ticker, current_price, target_price, direction, notes):
+    if not SENDER_EMAIL or not SENDER_PASSWORD: return False, "Secrets missing"
     try:
         msg = MIMEMultipart()
-        msg['From'], msg['To'] = SENDER_EMAIL, to_email
-        msg['Subject'] = f"StockPulse: {ticker} → ${price:,.2f}"
-        body = f"{ticker}\nPrice: ${price:,.2f}\nTarget: ${target}\n{direction}\n{notes}\n{datetime.now()}"
+        msg['From'] = SENDER_EMAIL; msg['To'] = to_email
+        msg['Subject'] = f"🚀 StockPulse: {ticker} hit ${current_price:,.2f}"
+        body = f"Ticker: {ticker}\nPrice: ${current_price}\nTarget: ${target_price}\nDirection: {direction}\nNote: {notes}\nTime: {datetime.now()}"
         msg.attach(MIMEText(body, 'plain'))
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.starttls(); server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, to_email, msg.as_string())
         server.quit()
-        return True, "Sent"
-    except Exception as e:
-        return False, str(e)
+        return True, "Email Sent"
+    except Exception as e: return False, str(e)
 
-def send_whatsapp_alert(to_number, ticker, price, target, direction):
-    if not TWILIO_SID: return False, "No Twilio"
-    clean = re.sub(r'\D', '', str(to_number))
-    if clean.startswith("0"): clean = "972" + clean[1:]
+def send_whatsapp_alert(to_number, ticker, current_price, target_price, direction):
+    if not TWILIO_SID: return False, "Secrets missing"
+    clean_digits = re.sub(r'\D', '', str(to_number))
+    if clean_digits.startswith("0"): clean_digits = "972" + clean_digits[1:]
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
-        client.messages.create(
-            from_=TWILIO_FROM,
-            body=f"*{ticker}* Alert!\nPrice: ${price:.2f}\nTarget: ${target}\n{direction}",
-            to=f"whatsapp:+{clean}"
-        )
-        return True, "Sent"
-    except Exception as e:
-        return False, str(e)
+        msg_body = f"🚀 *{ticker}* Alert!\nPrice: ${current_price:.2f}\nTarget: ${target_price}\nDirection: {direction}"
+        client.messages.create(from_=TWILIO_FROM, body=msg_body, to=f"whatsapp:+{clean_digits}")
+        return True, "WA Sent"
+    except Exception as e: return False, str(e)
+
+def process_incoming_whatsapp():
+    if not TWILIO_SID: return
+    try:
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        raw_phone = str(st.session_state.user_phone)
+        digits_only = re.sub(r'\D', '', raw_phone)
+        if digits_only.startswith("0"): digits_only = "972" + digits_only[1:]
+        expected_sender = f"whatsapp:+{digits_only}"
+        messages = client.messages.list(limit=5, to=TWILIO_FROM)
+        changes = False
+        for msg in messages:
+            if msg.direction == 'inbound' and msg.from_ == expected_sender and msg.sid not in st.session_state.processed_msgs:
+                st.session_state.processed_msgs.add(msg.sid)
+                match = re.match(r"^([A-Z]+)\s+(\d+(\.\d+)?)$", msg.body.strip().upper())
+                if match:
+                    t, p = match.group(1), float(match.group(2))
+                    if not is_duplicate_alert(t, p, "Up"):
+                        new = {"ticker": t, "target_price": p, "current_price": 0.0, "direction": "Up", "notes": "WA Add", "created_at": str(datetime.now()), "status": "Active", "triggered_at": ""}
+                        st.session_state.alert_db = pd.concat([st.session_state.alert_db, pd.DataFrame([new])], ignore_index=True)
+                        changes = True
+                        st.toast(f"✅ WA Added: {t}")
+        if changes: sync_db(st.session_state.alert_db)
+    except: pass
 
 def check_alerts():
+    process_incoming_whatsapp()
     if st.session_state.alert_db.empty: return
-    active = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
-    if active.empty: return
-
-    tickers = active['ticker'].unique()
+    active_indices = st.session_state.alert_db.index[st.session_state.alert_db['status'] == 'Active'].tolist()
+    if not active_indices: return
+    active_df = st.session_state.alert_db.loc[active_indices]
+    tickers = active_df['ticker'].unique().tolist()
+    if not tickers: return
     try:
         data = yf.download(tickers, period="1d", progress=False)['Close']
         if len(tickers) == 1:
-            prices = {tickers[0]: data.iloc[-1].item()}
+            val = data.iloc[-1]
+            current_prices = {tickers[0]: val.item() if hasattr(val, 'item') else val}
         else:
-            prices = data.iloc[-1].to_dict()
-    except:
-        return
+            current_prices = data.iloc[-1].to_dict()
+    except: return
 
-    changed = False
-    for idx, row in active.iterrows():
-        price = prices.get(row['ticker'], 0)
-        if price <= 0: continue
-        st.session_state.alert_db.at[idx, 'current_price'] = price
-
-        target = float(row['target_price'])
-        if (row['direction'] == "Up" and price >= target) or (row['direction'] == "Down" and price <= target):
-            if st.session_state.user_email:
-                send_email_alert(st.session_state.user_email, row['ticker'], price, target, row['direction'], row['notes'])
-            if st.session_state.user_phone:
-                send_whatsapp_alert(st.session_state.user_phone, row['ticker'], price, target, row['direction'])
-            st.session_state.alert_db.at[idx, 'status'] = 'Completed'
-            st.session_state.alert_db.at[idx, 'triggered_at'] = str(datetime.now())
-            st.toast(f"Triggered: {row['ticker']}")
-            changed = True
-
-    if changed:
+    changes_made = False
+    for idx in active_indices:
+        row = st.session_state.alert_db.loc[idx]
+        tkr = row['ticker']
+        price = current_prices.get(tkr, 0)
+        if price > 0:
+            st.session_state.alert_db.at[idx, 'current_price'] = price
+            tgt = float(row['target_price'])
+            direct = row['direction']
+            triggered = (direct == "Up" and price >= tgt) or (direct == "Down" and price <= tgt)
+            if triggered:
+                if st.session_state.user_email: send_email_alert(st.session_state.user_email, tkr, price, tgt, direct, row['notes'])
+                if st.session_state.user_phone: send_whatsapp_alert(st.session_state.user_phone, tkr, price, tgt, direct)
+                st.session_state.alert_db.at[idx, 'status'] = 'Completed'
+                st.session_state.alert_db.at[idx, 'triggered_at'] = str(datetime.now())
+                st.toast(f"🔥 Triggered: {tkr}")
+                changes_made = True
+    if changes_made:
         sync_db(st.session_state.alert_db)
         st.rerun()
 
 # ==========================================
-# 4. UI & CSS – עיצוב מושלם ורספונסיבי
+# 5. UI & CSS (FINAL FIXES)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
-        .stApp { background: #0a0a0a; color: #e0e0e0; }
-        h1,h2,h3 { color: #FFC107 !important; margin: 0.5rem 0; }
-        .market-grid {
+        .stApp { background-color: #0e0e0e !important; color: #ffffff; }
+
+        /* --- DASHBOARD GRID CSS --- */
+        .dashboard-container {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 14px;
-            margin: 20px 8px;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
         }
-        @media (min-width: 640px) {
-            .market-grid { grid-template-columns: repeat(4, 1fr); gap: 18px; margin: 24px 12px; }
-        }
-        .market-card {
-            background: linear-gradient(135deg, #1e1e1e, #2d2d2d);
-            border-radius: 16px;
-            padding: 16px;
-            text-align: center;
+        .dashboard-card {
+            background-color: #1a1a1a;
             border: 1px solid #333;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.4);
-            transition: all 0.3s ease;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
         }
-        .market-card:hover {
-            transform: translateY(-6px);
-            border-color: #FFC107;
-            box-shadow: 0 12px 24px rgba(255,193,7,0.15);
+        .dashboard-title {
+            color: #dcdcdc; 
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-transform: uppercase;
         }
-        .market-title { font-size: 0.8rem; color: #aaa; letter-spacing: 1px; margin-bottom: 8px; }
-        .market-value { font-size: 1.7rem; font-weight: 800; color: #fff; }
-        .market-delta { font-size: 1rem; font-weight: bold; margin-top: 4px; }
-        .alert-row {
-            background: #1a1a1a;
-            padding: 14px;
-            border-radius: 12px;
-            margin: 10px 0;
-            border-left: 5px solid #333;
+        .dashboard-value {
+            color: #ffffff; 
+            font-size: 1.5rem;
+            font-weight: 800;
         }
-        .ticker-big { font-size: 1.5rem; font-weight: 900; color: #FFC107; }
-        .target-big { font-size: 1.3rem; font-weight: bold; color: #00E676; }
-        div.stButton > button { height: 38px !important; border-radius: 10px !important; }
+        .dashboard-delta {
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        /* --- MOBILE TABLE FIX (CRITICAL) --- */
+        @media (max-width: 640px) {
+            /* 1. Force columns to stay in a row */
+            div[data-testid="stHorizontalBlock"] {
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                gap: 2px !important;
+            }
+            /* 2. Allow columns to be very narrow */
+            div[data-testid="column"] {
+                flex: 1 !important;
+                min-width: 0 !important;
+                padding: 0 !important;
+            }
+        }
+
+        /* Compact Buttons */
+        div.stButton > button {
+            width: 100% !important;
+            padding: 0px !important;
+            font-size: 0.75rem !important;
+            height: 28px !important;
+            line-height: 28px !important;
+            margin: 0px !important;
+            border: 1px solid #444 !important;
+        }
+        
+        .tbl-header { font-size: 0.7rem; color: #ccc; font-weight: bold; text-align: center; }
+        .compact-text { 
+            font-size: 0.8rem; 
+            white-space: nowrap; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            padding-top: 6px; 
+            font-family: monospace; 
+            text-align: center; 
+        }
+        
+        /* Input Fields */
+        div[data-baseweb="input"] > div, 
+        div[data-baseweb="select"] > div {
+            background-color: #262730 !important;
+            color: #ffffff !important;
+            border: 1px solid #555 !important;
+        }
+        input { color: #ffffff !important; }
+
+        /* Tabs */
+        button[data-baseweb="tab"] { color: white !important; font-weight: bold; }
+        button[data-baseweb="tab"][aria-selected="true"] { color: #FFC107 !important; border-bottom-color: #FFC107 !important; }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 5. MAIN APP
+# 6. MAIN APP
 # ==========================================
 def main():
     apply_custom_ui()
+    
+    if 'user_email' not in st.session_state: st.session_state.user_email = ""
+    if 'user_phone' not in st.session_state: st.session_state.user_phone = ""
+    if 'processed_msgs' not in st.session_state: st.session_state.processed_msgs = set()
+    if 'alert_db' not in st.session_state: st.session_state.alert_db = load_data_from_db()
+    
+    if 'edit_ticker' not in st.session_state: st.session_state.edit_ticker = ""
+    if 'edit_price' not in st.session_state: st.session_state.edit_price = 0.0
+    if 'edit_note' not in st.session_state: st.session_state.edit_note = ""
 
-    # Session state
-    for key in ['user_email','user_phone','processed_msgs','alert_db','edit_ticker','edit_price','edit_note']:
-        if key not in st.session_state:
-            if key == 'processed_msgs': st.session_state[key] = set()
-            elif key == 'alert_db': st.session_state[key] = load_data_from_db()
-            else: st.session_state[key] = "" if "email" in key or "phone" in key or "note" in key else 0.0
+    # --- HEADER ---
+    c_title, c_time = st.columns([3, 1])
+    with c_title:
+        st.markdown("<h3 style='text-align: left; margin:0; color: #FFC107;'>⚡ StockPulse</h3>", unsafe_allow_html=True)
+    with c_time:
+        current_time = datetime.now().strftime("%d/%m %H:%M")
+        st.markdown(f"""<div style="text-align: right; padding-top:5px;"><small style="color: #aaa;">{current_time}</small></div>""", unsafe_allow_html=True)
 
-    # Header
-    col1, col2 = st.columns([3,1])
-    with col1:
-        st.markdown("<h2 style='margin:0;'>StockPulse</h2>", unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"<div style='text-align:right; color:#888;'>{datetime.now():%d/%m %H:%M}</div>", unsafe_allow_html=True)
-
-    # Market Dashboard
+    # --- DASHBOARD (FLATTENED HTML FIX) ---
     with st.container():
-        st.markdown("### Market Overview")
-        market = get_market_status()
-        cards = ""
-        for label, key in [("S&P 500","S&P 500"), ("Nasdaq","Nasdaq"), ("VIX","VIX"), ("Bitcoin","BTC")]:
-            val, delta = market.get(key, (0,0))
-            if val == 0:
-                vstr, dstr, col = "—", "0.00%", "#888"
+        st.markdown("### 🌍 Market")
+        
+        market_data = get_market_status()
+        metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
+        
+        # Build cards list string explicitly on ONE LINE to avoid markdown code block interpretation
+        cards_html = ""
+        for label, key in metrics:
+            val, delta = market_data[key]
+            
+            if val == 0.0:
+                display_val = "0.00"
+                display_delta = "0.00%"
+                color_delta = "#4CAF50"
             else:
-                vstr = f"{val:,.0f}" if key != "VIX" else f"{val:.2f}"
-                if key == "BTC": vstr = f"{val:,.0f}"
-                dstr = f"{delta:+.2f}%"
-                col = "#FF4B4B" if (key=="VIX" and delta>=0) or (key!="VIX" and delta<0) else "#00E676"
-            cards += f"""
-            <div class="market-card">
-                <div class="market-title">{label}</div>
-                <div class="market-value">{vstr}</div>
-                <div class="market-delta" style="color:{col}">{dstr}</div>
-            </div>"""
-        st.markdown(f'<div class="market-grid">{cards}</div>', unsafe_allow_html=True)
+                display_val = f"{val:,.2f}" if key == "VIX" else f"{val:,.0f}"
+                display_delta = f"{delta:.2f}%"
+                color_delta = "#4CAF50" # Green
+                if delta < 0: color_delta = "#FF4B4B" # Red
+                if key == "VIX": color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50"
+
+            # Flattened HTML string:
+            cards_html += f'<div class="dashboard-card"><div class="dashboard-title">{label}</div><div class="dashboard-value">{display_val}</div><div style="color: {color_delta};" class="dashboard-delta">{display_delta}</div></div>'
+        
+        # Final HTML wrapper
+        final_html = f'<div class="dashboard-container">{cards_html}</div>'
+        
+        st.markdown(final_html, unsafe_allow_html=True)
         st.markdown("---")
 
-    # Settings
-    with st.expander("Connection Settings", expanded=False):
+    # --- SETTINGS ---
+    with st.expander("⚙️ Connection", expanded=False):
         c1, c2 = st.columns(2)
-        with c1: email = st.text_input("Email", value=st.session_state.user_email)
-        with c2: phone = st.text_input("WhatsApp", value=st.session_state.user_phone)
+        with c1: st.text_input("Email", key="temp_email", value=st.session_state.user_email)
+        with c2: st.text_input("WhatsApp", key="temp_phone", value=st.session_state.user_phone)
         if st.button("Save Settings", type="primary"):
-            st.session_state.user_email, st.session_state.user_phone = email, phone
+            st.session_state.user_email = st.session_state.temp_email
+            st.session_state.user_phone = st.session_state.temp_phone
             st.success("Saved!")
+        
+        auto_poll = st.toggle("🔄 Auto-Poll (60s)", value=False)
+        if auto_poll:
+            check_alerts()
+            time.sleep(60)
+            st.rerun()
 
-    # Tabs
-    tab1, tab2, tab3 = st.tabs(["Active Alerts", "Smart SL Calc", "History"])
-
-    with tab1:
-        col_list, col_add = st.columns([2.5, 1])
-        active = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
-
+    # --- TABS ---
+    tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active", "🛡️ Calc", "📂 Log"])
+    
+    # 1. ALERTS TAB
+    with tab_alerts:
+        col_list, col_add = st.columns([2, 1])
+        active_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
+        
         with col_list:
-            view = st.radio("View", ["Table", "Cards"], horizontal=True, label_visibility="collapsed")
-            if active.empty:
-                st.info("No active alerts")
-            else:
-                                  if view == "Table":
-                        for idx, row in active.iterrows():
-                            curr = float(row['current_price'] or 0)
-                            tgt = float(row['target_price'])
-                            diff = (curr - tgt) / tgt * 100 if tgt else 0
-                            bar_color = "#00E676" if row['direction'] == "Up" else "#FF4B4B"
+            view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
+            
+            if not active_view.empty:
+                # --- TABLE VIEW (OPTIMIZED FOR MOBILE) ---
+                if view_mode == "📄 Table":
+                    # Headers - Adjusted Ratios for tight fit
+                    h1, h2, h3, h4 = st.columns([1.3, 1.2, 1.2, 1.0]) 
+                    h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
+                    h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
+                    h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
+                    h4.markdown("<div class='tbl-header'>ACT</div>", unsafe_allow_html=True)
+                    st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
+                    
+                    for idx, row in active_view.iterrows():
+                        # Rows - Using same tight ratios
+                        c1, c2, c3, c4 = st.columns([1.3, 1.2, 1.2, 1.0])
+                        
+                        with c1: st.markdown(f"<div class='compact-text' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
+                        with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
+                        with c3: st.markdown(f"<div class='compact-text' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
+                        
+                        with c4:
+                            b_edit, b_del = st.columns([1, 1], gap="small")
+                            with b_edit:
+                                if st.button("✏️", key=f"te_{idx}"):
+                                    st.session_state.edit_ticker = row['ticker']
+                                    st.session_state.edit_price = float(row['target_price'])
+                                    st.session_state.edit_note = row['notes']
+                                    st.session_state.alert_db.drop(idx, inplace=True)
+                                    st.session_state.alert_db.reset_index(drop=True, inplace=True)
+                                    sync_db(st.session_state.alert_db)
+                                    st.rerun()
+                            with b_del:
+                                if st.button("🗑️", key=f"td_{idx}"):
+                                    st.session_state.alert_db.drop(idx, inplace=True)
+                                    st.session_state.alert_db.reset_index(drop=True, inplace=True)
+                                    sync_db(st.session_state.alert_db)
+                                    st.rerun()
+                        st.markdown("<hr style='margin: 4px 0; border-color: #333;'>", unsafe_allow_html=True)
 
-                            # כפתורים לפני ה-HTML – חייבים להיות כאן!
-                            col_edit, col_del = st.columns([1, 1])
-                            edit_clicked = col_edit.button("Edit", key=f"e{idx}")
-                            delete_clicked = col_del.button("Delete", key=f"d{idx}")
-
-                            st.markdown(f"""
-                            <div class="alert-row" style="border-left-color:{bar_color}">
-                                <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <div>
-                                        <span class="ticker-big">{row['ticker']}</span>
-                                        <span style="margin:0 10px; color:#888;">→</span>
-                                        <span class="target-big">${tgt:.2f}</span>
-                                    </div>
-                                    <div style="text-align:right;">
-                                        <div style="color:#aaa; font-size:0.9rem;">Now ${curr:.2f}</div>
-                                        <div style="color:{'#00E676' if diff>=0 else '#FF4B4B'}">{diff:+.2f}%</div>
-                                    </div>
-                                </div>
-                                <div style="margin-top:8px; color:#aaa; font-size:0.9rem;">
-                                    {row['direction']} • {row['notes'] or "No note"}
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-
-                            # טיפול בלחיצות – רק אחרי שהכפתורים נוצרו!
-                            if edit_clicked:
+                # --- CARD VIEW ---
+                else:
+                    for idx, row in active_view.iterrows():
+                        st.markdown(f"""<div style="background:#F9E79F; padding:8px; border-radius:6px; margin-bottom:5px; color:black;"><div style="display:flex; justify-content:space-between;"><b>{row['ticker']}</b> <b>${float(row['target_price']):.2f}</b></div><small>{row['direction']} | {row['notes']}</small></div>""", unsafe_allow_html=True)
+                        
+                        bc1, bc2, bc3 = st.columns([1, 1, 4])
+                        with bc1:
+                            if st.button("✏️", key=f"ce_{idx}"):
                                 st.session_state.edit_ticker = row['ticker']
-                                st.session_state.edit_price = tgt
+                                st.session_state.edit_price = float(row['target_price'])
                                 st.session_state.edit_note = row['notes']
                                 st.session_state.alert_db.drop(idx, inplace=True)
+                                st.session_state.alert_db.reset_index(drop=True, inplace=True)
                                 sync_db(st.session_state.alert_db)
                                 st.rerun()
-
-                            if delete_clicked:
+                        with bc2:
+                            if st.button("🗑️", key=f"cd_{idx}"):
                                 st.session_state.alert_db.drop(idx, inplace=True)
+                                st.session_state.alert_db.reset_index(drop=True, inplace=True)
                                 sync_db(st.session_state.alert_db)
                                 st.rerun()
+            else:
+                st.info("No active alerts.")
+
         with col_add:
-            st.markdown("### Add Alert")
-            with st.form("add_form"):
-                t = st.text_input("Ticker", value=st.session_state.edit_ticker).upper()
-                p = st.number_input("Target Price", value=float(st.session_state.edit_price or 0), step=0.1)
-                d = st.selectbox("Direction", ["Up", "Down"], index=0 if st.session_state.get("direction","Up")=="Up" else 1)
-                n = st.text_input("Note", value=st.session_state.edit_note)
+            st.markdown("### ➕ Add")
+            with st.form("add_alert"):
+                def_t = st.session_state.edit_ticker if st.session_state.edit_ticker else ""
+                def_p = st.session_state.edit_price if st.session_state.edit_price else 0.0
+                def_n = st.session_state.edit_note if st.session_state.edit_note else ""
+
+                t = st.text_input("Ticker", value=def_t).upper()
+                p = st.number_input("Target", min_value=0.0, value=def_p, step=0.1)
+                d = st.selectbox("Dir", ["Up", "Down"])
+                n = st.text_input("Note", value=def_n)
+                
                 if st.form_submit_button("Save", type="primary"):
                     if is_duplicate_alert(t, p, d):
-                        st.error("Already exists!")
+                        st.error("Exists!")
                     else:
-                        new = {"ticker":t, "target_price":p, "current_price":0.0, "direction":d,
-                               "notes":n, "created_at":str(datetime.now()), "status":"Active", "triggered_at":""}
+                        new = {
+                            "ticker": t, "target_price": p, "current_price": 0.0, 
+                            "direction": d, "notes": n, 
+                            "created_at": str(datetime.now()), "status": "Active", "triggered_at": ""
+                        }
                         st.session_state.alert_db = pd.concat([st.session_state.alert_db, pd.DataFrame([new])], ignore_index=True)
                         sync_db(st.session_state.alert_db)
-                        st.session_state.edit_ticker = st.session_state.edit_price = st.session_state.edit_note = ""
-                        st.success(f"{t} added!")
+                        st.session_state.edit_ticker = ""
+                        st.session_state.edit_price = 0.0
+                        st.session_state.edit_note = ""
+                        st.success(f"Saved {t}!")
                         st.rerun()
 
-    with tab2:
-        st.markdown("### Smart Stop-Loss Calculator")
-        ticker = st.text_input("Ticker", placeholder="AAPL").upper()
-        price = 0.0
-        if ticker:
+    # 2. CALCULATOR TAB
+    with tab_calc:
+        st.markdown("### 🧠 Calc")
+        
+        calc_ticker = st.text_input("Stock Ticker", placeholder="Ticker...").upper()
+        
+        current_val = 0.0
+        if calc_ticker:
             try:
-                price = float(yf.Ticker(ticker).history(period='1d')['Close'].iloc[-1])
+                data = yf.Ticker(calc_ticker).history(period='1d')['Close']
+                if not data.empty:
+                    current_val = float(data.iloc[-1])
             except: pass
-        buy = st.slider("Entry Price", 0.0, price*2 if price else 1000.0, price or 100.0, 0.1)
-        if st.button("Calculate SL", type="primary"):
-            with st.spinner("Analyzing..."):
-                res, err = calculate_smart_sl(ticker, buy)
-                if err: st.error(err)
-                else: st.session_state.calc = res; st.session_state.calc_ticker = ticker
-        if 'calc' in st.session_state:
-            r = st.session_state.calc
-            t = st.session_state.calc_ticker
-            st.markdown(f"""
-            <div style="background:#1e1e1e; padding:20px; border-radius:12px; border-left:5px solid #FFC107;">
-                <h3>{t} • Smart SL</h3>
-                <h2 style="color:#00E676;">${r['sl_price']:.2f}</h2>
-                <p><b>Reason:</b> {r['reason']} • <b>Trend:</b> {r['trend']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button("Set Alert at this SL"):
-                if is_duplicate_alert(t, r['sl_price'], "Down"):
-                    st.warning("Already active")
+        
+        max_rng = current_val * 2 if current_val > 0 else 1000.0
+        val_default = current_val if current_val > 0 else 0.0
+        
+        buy_price = st.slider("Buy Price ($)", min_value=0.0, max_value=max_rng, value=val_default, step=0.1)
+        
+        if st.button("Calculate", type="primary"):
+            if calc_ticker:
+                with st.spinner("Analyzing..."):
+                    res, err = calculate_smart_sl(calc_ticker, buy_price)
+                    if err: st.error(err)
+                    else:
+                        st.session_state.calc_res = res
+                        st.session_state.calc_ticker = calc_ticker
+        
+        if 'calc_res' in st.session_state:
+            res = st.session_state.calc_res
+            tkr = st.session_state.calc_ticker
+            
+            st.markdown(f"""<div style="background:#262730; padding:15px; border-radius:10px; border-left:5px solid #FFC107;"><h3 style="margin-top:0;">{tkr} Analysis</h3><div style="font-size:1.5rem; font-weight:bold; color:#FFC107;">SL: ${res['sl_price']:,.2f}</div><div>Reason: {res['reason']}</div><div>Trend: {res['trend']}</div></div>""", unsafe_allow_html=True)
+            
+            if st.button(f"🔔 Set Alert"):
+                sl_target = round(res['sl_price'], 2)
+                if is_duplicate_alert(tkr, sl_target, "Down"):
+                     st.warning("Active!")
                 else:
-                    new = {"ticker":t, "target_price":round(r['sl_price'],2), "current_price":r['current_price'],
-                           "direction":"Down", "notes":"Smart SL", "created_at":str(datetime.now()),
-                           "status":"Active", "triggered_at":""}
+                    new = {
+                        "ticker": tkr, "target_price": sl_target, "current_price": res['current_price'],
+                        "direction": "Down", "notes": f"Smart SL",
+                        "created_at": str(datetime.now()), "status": "Active", "triggered_at": ""
+                    }
                     st.session_state.alert_db = pd.concat([st.session_state.alert_db, pd.DataFrame([new])], ignore_index=True)
                     sync_db(st.session_state.alert_db)
-                    st.success("SL Alert Created!")
+                    st.success("Set!")
+                    time.sleep(1)
                     st.rerun()
 
-    with tab3:
-        st.markdown("### History Log")
-        done = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Completed']
-        if done.empty:
-            st.caption("No completed alerts")
-        else:
-            for _, row in done[::-1].iterrows():
-                st.success(f"{row['ticker']} → ${float(row['target_price']):.2f} @ {row['triggered_at'][:16]}")
-            if st.button("Clear History"):
+    # 3. HISTORY TAB
+    with tab_hist:
+        st.markdown("### 📜 Log")
+        hist_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Completed']
+        
+        if not hist_view.empty:
+            for idx, row in hist_view[::-1].iterrows():
+                st.info(f"✅ {row['ticker']} - ${float(row['target_price']):.2f} on {row['triggered_at']}")
+            
+            if st.button("🗑️ Clear Log"):
                 st.session_state.alert_db = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
                 sync_db(st.session_state.alert_db)
                 st.rerun()
-
-    # Auto-check every 60s if enabled
-    if st.toggle("Auto-refresh (60s)"):
-        check_alerts()
-        time.sleep(60)
-        st.rerun()
+        else:
+            st.caption("Empty.")
 
 if __name__ == "__main__":
     main()
