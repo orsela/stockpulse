@@ -16,7 +16,7 @@ import numpy as np
 # ==========================================
 # 0. CONFIGURATION & SECRETS
 # ==========================================
-st.set_page_config(page_title="StockPulse Terminal", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="StockPulse", page_icon="⚡", layout="wide")
 
 try:
     SENDER_EMAIL = st.secrets.get("SENDER_EMAIL", "")
@@ -260,66 +260,32 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (MOBILE GRID FIXES)
+# 5. UI & CSS (BULLETPROOF MOBILE FIXES)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
-        
-        /* --- DASHBOARD GRID --- */
-        /* Custom Grid Class for 2x2 layout */
-        .market-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        .market-card {
-            background-color: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 10px;
-            text-align: center;
-        }
-        .market-title {
-            color: #ffffff !important; /* FIXED: Bright White Title */
-            font-size: 0.8rem;
-            font-weight: bold;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }
-        .market-value {
-            color: #ffffff;
-            font-size: 1.4rem;
-            font-weight: 800;
-        }
-        .market-delta {
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-        .delta-pos { color: #4CAF50; }
-        .delta-neg { color: #FF4B4B; }
 
-        /* --- MOBILE TABLE FIX --- */
-        /* Force Streamlit columns to stay side-by-side on mobile */
-        @media (max-width: 640px) {
-            div[data-testid="column"] {
-                width: auto !important;
-                flex: 1 1 auto !important;
-                min-width: 0px !important;
-            }
-            /* Hide the gap container that Streamlit sometimes adds */
-            div[data-testid="column"] > div {
-                width: 100% !important;
-            }
+        /* --- FORCING COLUMNS TO STAY IN ROW ON MOBILE --- */
+        /* This is the critical fix for the table stacking issue */
+        div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+        }
+        
+        div[data-testid="column"] {
+            flex: 1 !important;
+            min-width: 0px !important; /* Allow shrinking */
+            width: auto !important;
+            padding: 0 2px !important;
         }
 
         /* --- BUTTONS --- */
         div.stButton > button {
             width: 100% !important;
             padding: 0px !important;
-            font-size: 0.8rem !important;
+            font-size: 0.75rem !important;
             height: 28px !important;
             line-height: 28px !important;
             margin: 0px !important;
@@ -327,19 +293,20 @@ def apply_custom_ui():
         
         /* Headers styling */
         .tbl-header {
-            font-size: 0.75rem;
-            color: #aaa;
+            font-size: 0.7rem;
+            color: #ccc;
             font-weight: bold;
             text-transform: uppercase;
         }
         
         /* Text styling */
         .compact-text {
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            padding-top: 4px;
+            padding-top: 6px;
+            font-family: monospace;
         }
 
         /* High Contrast Inputs */
@@ -385,7 +352,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- DASHBOARD (CUSTOM HTML FOR 2x2 GRID) ---
+    # --- DASHBOARD (PURE HTML GRID - BULLETPROOF 2x2) ---
     with st.container():
         st.markdown("### 🌍 Market")
         
@@ -393,35 +360,41 @@ def main():
         market_data = get_market_status()
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
         
-        # 2. Build HTML Grid
-        html_content = '<div class="market-grid">'
+        # 2. Build HTML Grid manually to force 2x2 on mobile
+        html_content = """
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px;">
+        """
         
         for label, key in metrics:
             val, delta = market_data[key]
             
-            # Formatting
+            # Logic & Colors
             if val == 0.0:
                 display_val = "0.00"
                 display_delta = "0.00%"
-                delta_class = "delta-pos"
+                color_delta = "#4CAF50"
             else:
                 display_val = f"{val:,.2f}" if key == "VIX" else f"{val:,.0f}"
                 display_delta = f"{delta:.2f}%"
-                delta_class = "delta-pos" if delta >= 0 else "delta-neg"
-                if key == "VIX": delta_class = "delta-neg" if delta >= 0 else "delta-pos" # VIX logic
+                
+                # Colors
+                color_delta = "#4CAF50" # Green
+                if delta < 0: color_delta = "#FF4B4B" # Red
+                if key == "VIX": # Invert VIX colors
+                     color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50"
 
-            # Create Card HTML
+            # Individual Card HTML
             html_content += f"""
-            <div class="market-card">
-                <div class="market-title">{label}</div>
-                <div class="market-value">{display_val}</div>
-                <div class="market-delta {delta_class}">{display_delta}</div>
+            <div style="background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; text-align: center;">
+                <div style="color: #e0e0e0; font-size: 0.75rem; font-weight: bold; text-transform: uppercase;">{label}</div>
+                <div style="color: #ffffff; font-size: 1.3rem; font-weight: 800; margin: 2px 0;">{display_val}</div>
+                <div style="color: {color_delta}; font-size: 0.8rem; font-weight: bold;">{display_delta}</div>
             </div>
             """
         
-        html_content += '</div>'
+        html_content += "</div>"
         
-        # 3. Render HTML
+        # 3. Render
         st.markdown(html_content, unsafe_allow_html=True)
         st.markdown("---")
 
@@ -453,27 +426,27 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW (FORCED SINGLE LINE MOBILE) ---
+                # --- TABLE VIEW ---
                 if view_mode == "📄 Table":
-                    # Headers: Ticker | Target | Current | Actions
-                    # CSS @media forces these to stay in one row
-                    h1, h2, h3, h4 = st.columns([1.2, 1.2, 1.2, 1.0]) 
-                    h1.markdown("<span class='tbl-header'>SYM</span>", unsafe_allow_html=True)
-                    h2.markdown("<span class='tbl-header'>TGT</span>", unsafe_allow_html=True)
-                    h3.markdown("<span class='tbl-header'>CUR</span>", unsafe_allow_html=True)
-                    h4.markdown("<span class='tbl-header'>ACT</span>", unsafe_allow_html=True)
+                    # Headers
+                    # We use tighter ratios to ensure it fits
+                    h1, h2, h3, h4 = st.columns([1, 1, 1, 0.8]) 
+                    h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
+                    h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
+                    h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
+                    h4.markdown("<div class='tbl-header'>ACT</div>", unsafe_allow_html=True)
                     st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        # The CSS will prevent these from stacking
-                        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.0])
+                        # Rows
+                        c1, c2, c3, c4 = st.columns([1, 1, 1, 0.8])
                         
                         # Data
                         with c1: st.markdown(f"<div class='compact-text' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
                         with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
                         with c3: st.markdown(f"<div class='compact-text' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
                         
-                        # Buttons (Tiny & Side-by-Side)
+                        # Buttons
                         with c4:
                             b_edit, b_del = st.columns([1, 1], gap="small")
                             with b_edit:
