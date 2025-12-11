@@ -87,7 +87,7 @@ def is_duplicate_alert(ticker, target, direction):
     except: return False
 
 def get_market_status():
-    """Fetches market data, handling NaNs and market closures"""
+    """Fetches market data, with strict NaN handling"""
     tickers = {'S&P 500': '^GSPC', 'Nasdaq': '^IXIC', 'VIX': '^VIX', 'Bitcoin': 'BTC-USD'}
     results = {}
     
@@ -100,16 +100,20 @@ def get_market_status():
                  results[name] = (0.0, 0.0)
                  continue
 
+            # Get Last Price
             price = hist['Close'].iloc[-1]
+            
+            # Calculate Delta
             if len(hist) >= 2:
                 prev_close = hist['Close'].iloc[-2]
                 delta = ((price - prev_close) / prev_close) * 100
             else:
                 delta = 0.0
 
-            # NAN FIX: Ensure valid numbers
-            if pd.isna(price) or np.isnan(price): price = 0.0
-            if pd.isna(delta) or np.isnan(delta): delta = 0.0
+            # --- STRICT NAN CLEANING ---
+            # Convert to standard python float, replacing nan/inf with 0.0
+            price = float(np.nan_to_num(price))
+            delta = float(np.nan_to_num(delta))
 
             results[name] = (price, delta)
         except Exception as e:
@@ -252,7 +256,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (OPTIMIZED)
+# 5. UI & CSS (FINAL HIGH CONTRAST)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -271,56 +275,65 @@ def apply_custom_ui():
         div[data-baseweb="select"] span { color: #ffffff !important; }
         label { color: #ffc107 !important; font-weight: bold !important; }
 
-        /* Dashboard Metrics */
+        /* --- DASHBOARD METRICS: HIGH CONTRAST --- */
         div[data-testid="metric-container"] {
             background-color: #1c1c1e;
             border: 1px solid #333;
             border-radius: 8px;
-            padding: 10px; /* Reduced padding */
+            padding: 15px; 
             color: #ffffff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
-        div[data-testid="metric-container"] > div:nth-child(2) {
-            color: #FFC107 !important;
-            font-weight: bold;
+        
+        /* LABEL (e.g. S&P 500) */
+        div[data-testid="stMetricLabel"] p {
+            color: #d0d0d0 !important; /* Light Silver */
+            font-size: 1rem !important;
+            font-weight: 600 !important;
+        }
+        
+        /* VALUE (e.g. 6,856.00) */
+        div[data-testid="stMetricValue"] {
+            color: #ffffff !important; /* PURE WHITE */
+            font-size: 2rem !important;
+            font-weight: 700 !important;
+            text-shadow: 0px 0px 10px rgba(255, 255, 255, 0.1);
         }
 
-        /* TABS VISIBILITY - FIXED */
-        button[data-baseweb="tab"] {
-            color: #ffffff !important; /* Force white text */
-            font-weight: bold !important;
+        /* DELTA (e.g. -0.52%) - Streamlit handles color, we boost visibility */
+        div[data-testid="stMetricDelta"] {
             font-size: 1rem !important;
+            font-weight: bold !important;
+        }
+
+        /* TABS Styling */
+        button[data-baseweb="tab"] {
+            color: #ffffff !important; 
+            font-weight: bold !important;
         }
         button[data-baseweb="tab"][aria-selected="true"] {
-            color: #FFC107 !important; /* Gold when active */
+            color: #FFC107 !important; 
             border-bottom-color: #FFC107 !important;
         }
 
-        /* Buttons General */
-        button[kind="primary"] { background-color: #FF4B4B !important; color: white !important; border: none; }
-        
-        /* COMPACT TABLE ACTIONS - SMALLER BUTTONS */
+        /* COMPACT BUTTONS IN TABLE */
         div.stButton > button {
             width: auto !important;
-            padding: 0.25rem 0.5rem !important; /* Very small padding */
-            font-size: 0.8rem !important;
+            padding: 0px 8px !important; /* Extremely tight padding */
+            font-size: 0.85rem !important;
             min-height: 0px !important;
-            height: auto !important;
-            line-height: 1 !important;
+            height: 28px !important; /* Fixed small height */
+            line-height: 28px !important;
             margin-top: 0px !important;
         }
         
-        /* Remove spacing between columns in table */
-        div[data-testid="column"] {
-            padding: 0 !important;
-        }
-        
-        /* Force Single Line on Mobile */
+        /* Layout tweak for mobile wrapping */
         .compact-text {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            font-size: 0.9rem;
-            margin-top: 5px;
+            font-size: 0.95rem;
+            margin-top: 4px;
         }
 
     </style>
@@ -361,8 +374,13 @@ def main():
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
         for i, (label, key) in enumerate(metrics):
             val, delta = market_data[key]
-            display_val = f"{val:,.0f}" if val != 0 else "N/A" # Removed decimals for compactness
-            display_delta = f"{delta:.1f}%" if val != 0 else "0.0%"
+            
+            # Formatting with 0.00 fallback for visual consistency
+            display_val = f"{val:,.0f}" if val > 0 else "0"
+            if key == "VIX": display_val = f"{val:,.2f}" # VIX needs decimals
+            
+            display_delta = f"{delta:.2f}%" 
+            
             with m_cols[i]:
                 st.metric(label=label, value=display_val, delta=display_delta)
         st.markdown("---")
@@ -395,26 +413,25 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW (OPTIMIZED FOR MOBILE) ---
+                # --- TABLE VIEW ---
                 if view_mode == "📄 Table":
-                    # Reduced columns to just fit info
+                    # Headers
                     h1, h2, h3, h4 = st.columns([1.5, 2, 1.5, 1.5]) 
                     h1.markdown("**Sym**")
                     h2.markdown("**Tgt**")
                     h3.markdown("**Cur**")
                     h4.markdown("**Act**")
-                    st.markdown("<hr style='margin: 2px 0; border-color: #444;'>", unsafe_allow_html=True)
+                    st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        # Tight columns
+                        # Columns
                         c1, c2, c3, c4 = st.columns([1.5, 2, 1.5, 1.5])
                         
-                        # Use HTML for nowrap text
                         with c1: st.markdown(f"<div class='compact-text'><b>{row['ticker']}</b></div>", unsafe_allow_html=True)
                         with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
                         with c3: st.markdown(f"<div class='compact-text'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
                         with c4:
-                            # Side by side mini buttons
+                            # TIGHT BUTTONS
                             b_edit, b_del = st.columns([1, 1], gap="small")
                             with b_edit:
                                 if st.button("✏️", key=f"te_{idx}"):
@@ -431,13 +448,13 @@ def main():
                                     st.session_state.alert_db.reset_index(drop=True, inplace=True)
                                     sync_db(st.session_state.alert_db)
                                     st.rerun()
-                        st.markdown("<hr style='margin: 2px 0; border-color: #333;'>", unsafe_allow_html=True)
+                        st.markdown("<hr style='margin: 4px 0; border-color: #333;'>", unsafe_allow_html=True)
 
                 # --- CARD VIEW ---
                 else:
                     for idx, row in active_view.iterrows():
                         st.markdown(f"""
-                        <div style="background:#F9E79F; padding:10px; border-radius:8px; margin-bottom:5px; color:black;">
+                        <div style="background:#F9E79F; padding:8px; border-radius:6px; margin-bottom:5px; color:black;">
                             <div style="display:flex; justify-content:space-between;">
                                 <b>{row['ticker']}</b> 
                                 <b>${float(row['target_price']):.2f}</b>
@@ -465,7 +482,7 @@ def main():
                 st.info("No active alerts.")
 
         with col_add:
-            st.markdown("### ➕ Add / Edit")
+            st.markdown("### ➕ Add")
             with st.form("add_alert"):
                 def_t = st.session_state.edit_ticker if st.session_state.edit_ticker else ""
                 def_p = st.session_state.edit_price if st.session_state.edit_price else 0.0
@@ -476,7 +493,7 @@ def main():
                 d = st.selectbox("Dir", ["Up", "Down"])
                 n = st.text_input("Note", value=def_n)
                 
-                if st.form_submit_button("Save Alert", type="primary"):
+                if st.form_submit_button("Save", type="primary"):
                     if is_duplicate_alert(t, p, d):
                         st.error("Exists!")
                     else:
@@ -495,7 +512,7 @@ def main():
 
     # 2. CALCULATOR TAB
     with tab_calc:
-        st.markdown("### 🧠 AI Stop-Loss")
+        st.markdown("### 🧠 Calc")
         
         calc_ticker = st.text_input("Stock Ticker", placeholder="Ticker...").upper()
         
