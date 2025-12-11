@@ -236,101 +236,82 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (GRID + CONTRAST FIXES)
+# 5. UI & CSS (FINAL - LOCKED DASHBOARD + FIXED TABLE)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
 
-        /* --- 1. DASHBOARD GRID SYSTEM (The Fix) --- */
-        /* This forces 2 columns on mobile, 4 on desktop */
+        /* --- 1. DASHBOARD GRID (LOCKED) --- */
         .dashboard-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr; /* Mobile Default: 2 per row */
+            grid-template-columns: 1fr 1fr; /* Mobile: 2 */
             gap: 10px;
             margin-bottom: 20px;
         }
-        
-        /* On wider screens (Tablets/Desktop), switch to 4 per row */
         @media (min-width: 768px) {
-            .dashboard-grid {
-                grid-template-columns: repeat(4, 1fr);
-            }
+            .dashboard-grid { grid-template-columns: repeat(4, 1fr); }
         }
 
         .market-card { 
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px; 
-            padding: 8px 12px;
-            
-            /* Horizontal Layout Inside Card */
-            display: flex;
-            flex-direction: row; 
-            justify-content: space-between;
-            align-items: center;
+            background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 8px 12px;
+            display: flex; flex-direction: row; justify-content: space-between; align-items: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
-        
         .market-title { font-size: 0.9rem; color: #fff; font-weight: bold; flex: 1; }
         .market-value { font-size: 0.9rem; color: #ddd; font-family: monospace; margin: 0 5px; }
         .market-delta { font-size: 0.85rem; font-weight: bold; min-width: 55px; text-align: right; direction: ltr; }
 
-        /* --- 2. INPUT CONTRAST FIX --- */
-        /* Forces inputs to have dark gray background and WHITE text */
+        /* --- 2. INPUT CONTRAST (LOCKED) --- */
         input, textarea, select, div[data-baseweb="select"] > div {
-            color: #ffffff !important;
-            background-color: #262626 !important;
-            border-color: #555 !important;
+            color: #ffffff !important; background-color: #262626 !important; border-color: #555 !important;
         }
-        
-        /* Specifically target Streamlit's input wrapper */
-        div[data-testid="stTextInput"] > div > div {
-            background-color: #262626 !important;
-            color: white !important;
+        div[data-testid="stTextInput"] > div > div, div[data-testid="stNumberInput"] > div > div {
+            background-color: #262626 !important; color: white !important;
         }
-        div[data-testid="stNumberInput"] > div > div {
-            background-color: #262626 !important;
-            color: white !important;
-        }
-        
-        /* Label Color */
         label { color: #cccccc !important; font-weight: 500 !important; }
 
-        /* --- 3. TABLE FIXES --- */
+        /* --- 3. COMPACT TABLE FIXES (NEW) --- */
+        
+        /* Remove Gaps in the Table area specifically */
         div[data-testid="column"] { padding: 0px !important; }
+        div[data-testid="stHorizontalBlock"] { gap: 0px !important; }
         
+        /* Table Text Style */
         .tbl-header { 
-            font-size: 0.75rem; 
-            color: #888; 
-            font-weight: bold; 
-            text-transform: uppercase;
-            margin-bottom: 4px;
+            font-size: 0.7rem; color: #888; font-weight: bold; text-transform: uppercase; 
+            text-align: left; padding-left: 4px; margin-bottom: 2px;
         }
         
-        .table-row-bg {
-            background-color: #161616;
-            padding: 8px 4px;
-            border-radius: 6px;
-            margin-bottom: 4px;
-            border: 1px solid #222;
+        .tbl-cell { 
+            font-family: 'Roboto Mono', monospace; font-size: 0.8rem; color: #fff; 
+            padding: 8px 0px 8px 4px; /* Vertical align with button */
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-
-        .ticker-cell { font-family: 'Roboto Mono', monospace; font-weight: bold; color: #FFC107; font-size: 0.85rem; }
-        .value-cell { font-family: 'Roboto Mono', monospace; color: #fff; font-size: 0.85rem; }
         
-        /* Tiny Buttons */
+        .tbl-cell-dim { color: #aaa; }
+        
+        /* Minimal Action Buttons (The "Control Set") */
         div.stButton > button {
-            padding: 0px 8px !important;
-            font-size: 0.75rem !important;
-            height: 28px !important;
-            line-height: 28px !important;
-            border: 1px solid #444 !important;
-            background: #222 !important;
-            color: #eee !important;
+            padding: 0px !important;
+            margin: 0px !important;
+            font-size: 1rem !important; /* Icon size */
+            line-height: 1 !important;
+            height: 30px !important;
+            width: 30px !important;
+            border: none !important;
+            background: transparent !important;
+            color: #666 !important;
         }
-        div.stButton > button:hover { border-color: #888 !important; color: #fff !important; }
+        div.stButton > button:hover {
+            color: #fff !important;
+            background: #333 !important;
+            border-radius: 4px;
+        }
+        
+        /* Row Separator */
+        .row-sep { height: 1px; background: #222; margin: 0; }
 
     </style>
     """, unsafe_allow_html=True)
@@ -341,49 +322,37 @@ def apply_custom_ui():
 def main():
     apply_custom_ui()
     
+    # Init Session
     if 'user_email' not in st.session_state: st.session_state.user_email = ""
     if 'user_phone' not in st.session_state: st.session_state.user_phone = ""
     if 'processed_msgs' not in st.session_state: st.session_state.processed_msgs = set()
     if 'alert_db' not in st.session_state: st.session_state.alert_db = load_data_from_db()
-    
     if 'edit_ticker' not in st.session_state: st.session_state.edit_ticker = ""
     if 'edit_price' not in st.session_state: st.session_state.edit_price = 0.0
     if 'edit_note' not in st.session_state: st.session_state.edit_note = ""
 
-    # --- HEADER ---
+    # HEADER
     c1, c2 = st.columns([3,1])
     with c1: st.markdown("<h3 style='margin:0; color:#FFC107;'>StockPulse</h3>", unsafe_allow_html=True)
     with c2: st.markdown(f"<div style='text-align:right;color:#888;padding-top:8px;'>{datetime.now():%H:%M}</div>", unsafe_allow_html=True)
 
-    # --- DASHBOARD (GRID LAYOUT) ---
+    # DASHBOARD (LOCKED)
     market_data = get_market_status()
     metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
-    
-    # Grid Container
     html_out = '<div class="dashboard-grid">'
-    
     for label, key in metrics:
         v, d = market_data[key]
         vs = "—" if v==0 else f"{v:,.0f}" if key!="VIX" else f"{v:.2f}"
         ds = f"{d:+.2f}%" if v else "0.00%"
-        
-        # Color Logic
         is_up = True
-        if key == "VIX": 
-            is_up = False if d >= 0 else True 
-        else:
-            is_up = True if d >= 0 else False
-            
+        if key == "VIX": is_up = False if d >= 0 else True 
+        else: is_up = True if d >= 0 else False
         col = "#00E676" if is_up else "#FF4B4B"
-        
-        # Card HTML
-        row_html = f'<div class="market-card" style="border-left: 3px solid {col};"><div class="market-title">{label}</div><div class="market-value">{vs}</div><div class="market-delta" style="color:{col}">{ds}</div></div>'
-        html_out += row_html
-    
+        html_out += f'<div class="market-card" style="border-left: 3px solid {col};"><div class="market-title">{label}</div><div class="market-value">{vs}</div><div class="market-delta" style="color:{col}">{ds}</div></div>'
     html_out += '</div>'
     st.markdown(html_out, unsafe_allow_html=True)
 
-    # --- SETTINGS ---
+    # SETTINGS
     with st.expander("⚙️ Connection", expanded=False):
         c1, c2 = st.columns(2)
         with c1: st.text_input("Email", key="temp_email", value=st.session_state.user_email)
@@ -392,16 +361,15 @@ def main():
             st.session_state.user_email = st.session_state.temp_email
             st.session_state.user_phone = st.session_state.temp_phone
             st.success("Saved!")
-        auto_poll = st.toggle("🔄 Auto-Poll (60s)", value=False)
-        if auto_poll:
+        if st.toggle("🔄 Auto-Poll (60s)"):
             check_alerts()
             time.sleep(60)
             st.rerun()
 
-    # --- TABS ---
+    # TABS
     tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active", "🛡️ Calc", "📂 Log"])
     
-    # 1. ALERTS TAB
+    # 1. ALERTS TAB (RE-ENGINEERED)
     with tab_alerts:
         col_list, col_add = st.columns([2, 1])
         active_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
@@ -411,60 +379,54 @@ def main():
             
             if not active_view.empty:
                 if view_mode == "Table":
-                    # Headers with specific ratio
-                    h1, h2, h3, h4 = st.columns([1.5, 1.2, 1.2, 1.1]) 
-                    h1.markdown("<div class='tbl-header'>Ticker</div>", unsafe_allow_html=True)
-                    h2.markdown("<div class='tbl-header'>Target</div>", unsafe_allow_html=True)
-                    h3.markdown("<div class='tbl-header'>Current</div>", unsafe_allow_html=True)
-                    h4.markdown("<div class='tbl-header'>Action</div>", unsafe_allow_html=True)
-                    
-                    st.markdown("<div style='margin-bottom:5px;'></div>", unsafe_allow_html=True)
-                    
-                    for idx, row in active_view.iterrows():
-                        # Row Container for visual separation
-                        with st.container():
-                            r1, r2, r3, r4 = st.columns([1.5, 1.2, 1.2, 1.1])
-                            
-                            # Use divs to style text properly
-                            r1.markdown(f"<div class='ticker-cell'>{row['ticker']}</div>", unsafe_allow_html=True)
-                            r2.markdown(f"<div class='value-cell'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
-                            r3.markdown(f"<div class='value-cell' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
-                            
-                            with r4:
-                                if st.button("✕", key=f"td_{idx}"):
-                                    st.session_state.alert_db.drop(idx, inplace=True)
-                                    st.session_state.alert_db.reset_index(drop=True, inplace=True)
-                                    sync_db(st.session_state.alert_db)
-                                    st.rerun()
-                            
-                            # Separator line
-                            st.markdown("<div style='height:1px; background:#333; margin: 4px 0;'></div>", unsafe_allow_html=True)
-                
-                else: 
-                    # Card View (unchanged logic)
-                    for idx, row in active_view.iterrows():
-                        curr = float(row['current_price'] or 0)
-                        tgt = float(row['target_price'])
-                        diff = (curr - tgt) / tgt * 100 if tgt else 0
-                        dir_col = "#00E676" if row['direction'] == "Up" else "#FF4B4B"
+                    with st.container():
+                        # STRICT RATIOS
+                        ratios = [1.5, 1.2, 1.2, 1.0] 
+                        
+                        # HEADER
+                        h1, h2, h3, h4 = st.columns(ratios)
+                        h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
+                        h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
+                        h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
+                        h4.markdown("<div class='tbl-header'>ACT</div>", unsafe_allow_html=True)
+                        st.markdown("<div style='height:1px; background:#444; margin-bottom:2px;'></div>", unsafe_allow_html=True)
 
+                        # ROWS
+                        for idx, row in active_view.iterrows():
+                            c1, c2, c3, c4 = st.columns(ratios)
+                            
+                            c1.markdown(f"<div class='tbl-cell' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
+                            c2.markdown(f"<div class='tbl-cell'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
+                            c3.markdown(f"<div class='tbl-cell tbl-cell-dim'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
+                            
+                            with c4:
+                                # Tight Action Buttons
+                                b1, b2 = st.columns(2)
+                                with b1:
+                                    if st.button("✏️", key=f"ed_{idx}"):
+                                        st.session_state.edit_ticker = row['ticker']
+                                        st.session_state.edit_price = float(row['target_price'])
+                                        st.session_state.edit_note = row['notes']
+                                        st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
+                                with b2:
+                                    if st.button("✕", key=f"del_{idx}"):
+                                        st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
+                            
+                            st.markdown("<div class='row-sep'></div>", unsafe_allow_html=True)
+                else: 
+                    # CARD VIEW
+                    for idx, row in active_view.iterrows():
+                        curr = float(row['current_price'] or 0); tgt = float(row['target_price'])
+                        diff = (curr - tgt) / tgt * 100 if tgt else 0
+                        col = "#00E676" if row['direction'] == "Up" else "#FF4B4B"
                         st.markdown(f"""
-                        <div style="background:#1a1a1a; padding:10px; border-radius:8px; margin-bottom:8px; border-left:4px solid {dir_col}; display:flex; justify-content:space-between; align-items:center;">
-                            <div>
-                                <div style="font-weight:bold; color:#FFC107;">{row['ticker']}</div>
-                                <div style="font-size:0.8rem; color:#888;">Target: {tgt}</div>
-                            </div>
-                            <div style="text-align:right;">
-                                <div style="font-weight:bold; color:#fff;">{curr:.2f}</div>
-                                <div style="font-size:0.8rem; color:{dir_col};">{diff:+.1f}%</div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        <div style="background:#1a1a1a; padding:10px; border-radius:8px; margin-bottom:8px; border-left:4px solid {col}; display:flex; justify-content:space-between; align-items:center;">
+                            <div><div style="font-weight:bold; color:#FFC107;">{row['ticker']}</div><div style="font-size:0.8rem; color:#888;">Target: {tgt}</div></div>
+                            <div style="text-align:right;"><div style="font-weight:bold; color:#fff;">{curr:.2f}</div><div style="font-size:0.8rem; color:{col};">{diff:+.1f}%</div></div>
+                        </div>""", unsafe_allow_html=True)
                         if st.button("Delete", key=f"cd_{idx}"):
                              st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
-
-            else:
-                st.info("No active alerts.")
+            else: st.info("No active alerts.")
 
         with col_add:
             st.markdown("### ➕ Add")
@@ -479,8 +441,7 @@ def main():
                 n = st.text_input("Note", value=def_n)
                 
                 if st.form_submit_button("Save", type="primary"):
-                    if is_duplicate_alert(t, p, d):
-                        st.error("Exists!")
+                    if is_duplicate_alert(t, p, d): st.error("Exists!")
                     else:
                         new = {"ticker": t, "target_price": p, "current_price": 0.0, "direction": d, "notes": n, "created_at": str(datetime.now()), "status": "Active", "triggered_at": ""}
                         st.session_state.alert_db = pd.concat([st.session_state.alert_db, pd.DataFrame([new])], ignore_index=True)
@@ -498,18 +459,15 @@ def main():
                 data = yf.Ticker(calc_ticker).history(period='1d')['Close']
                 if not data.empty: current_val = float(data.iloc[-1])
             except: pass
-        
         max_rng = current_val * 2 if current_val > 0 else 1000.0
         val_default = current_val if current_val > 0 else 0.0
         buy_price = st.slider("Buy Price ($)", min_value=0.0, max_value=max_rng, value=val_default, step=0.1)
-        
         if st.button("Calculate", type="primary"):
             if calc_ticker:
                 with st.spinner("Analyzing..."):
                     res, err = calculate_smart_sl(calc_ticker, buy_price)
                     if err: st.error(err)
                     else: st.session_state.calc_res = res; st.session_state.calc_ticker = calc_ticker
-        
         if 'calc_res' in st.session_state:
             res = st.session_state.calc_res; tkr = st.session_state.calc_ticker
             st.markdown(f"""<div style="background:#262730; padding:15px; border-radius:10px; border-left:5px solid #FFC107;"><h3 style="margin-top:0;">{tkr} Analysis</h3><div style="font-size:1.5rem; font-weight:bold; color:#FFC107;">SL: ${res['sl_price']:,.2f}</div><div>Reason: {res['reason']}</div><div>Trend: {res['trend']}</div></div>""", unsafe_allow_html=True)
@@ -526,8 +484,7 @@ def main():
         st.markdown("### 📜 Log")
         hist_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Completed']
         if not hist_view.empty:
-            for idx, row in hist_view[::-1].iterrows():
-                st.info(f"✅ {row['ticker']} - ${float(row['target_price']):.2f} on {row['triggered_at']}")
+            for idx, row in hist_view[::-1].iterrows(): st.info(f"✅ {row['ticker']} - ${float(row['target_price']):.2f} on {row['triggered_at']}")
             if st.button("🗑️ Clear Log"):
                 st.session_state.alert_db = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
                 sync_db(st.session_state.alert_db); st.rerun()
