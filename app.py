@@ -72,7 +72,7 @@ def sync_db(df):
         st.error(f"Error saving to DB: {e}")
 
 # ==========================================
-# 2. LOGIC HELPERS (FULL LOGIC RESTORED)
+# 2. LOGIC HELPERS
 # ==========================================
 def is_duplicate_alert(ticker, target, direction):
     if st.session_state.alert_db.empty: return False
@@ -116,7 +116,7 @@ def get_market_status():
     return results
 
 # ==========================================
-# 3. ANALYSIS & NOTIFICATIONS (RESTORED)
+# 3. ANALYSIS & NOTIFICATIONS
 # ==========================================
 def calculate_smart_sl(ticker, buy_price):
     try:
@@ -236,7 +236,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (THE HYBRID SOLUTION)
+# 5. UI & CSS (FIXING THE MOBILE STACKING)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -266,9 +266,22 @@ def apply_custom_ui():
         }
         label { color: #888 !important; }
 
-        /* --- CRITICAL: ZERO GAP TABLE --- */
-        div[data-testid="column"] { padding: 0px !important; }
-        div[data-testid="stHorizontalBlock"] { gap: 0px !important; }
+        /* --- CRITICAL: FORCE COLUMNS TO STAY IN ONE ROW ON MOBILE --- */
+        
+        /* 1. Prevent wrapping in horizontal blocks */
+        div[data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            gap: 2px !important;
+        }
+        
+        /* 2. Force columns to shrink and not stack */
+        div[data-testid="column"] {
+            min-width: 0px !important; /* This allows columns to shrink below "minimum" size */
+            width: auto !important;
+            flex: 1 1 0px !important;
+            padding: 0px !important;
+        }
         
         /* Table Headers */
         .tbl-header { 
@@ -300,7 +313,7 @@ def apply_custom_ui():
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 6. MAIN APP (FULL LOGIC + NEW UI)
+# 6. MAIN APP (FULL LOGIC + UI)
 # ==========================================
 def main():
     apply_custom_ui()
@@ -321,7 +334,6 @@ def main():
 
     # DASHBOARD
     market_data = get_market_status()
-    # Linear HTML construction to avoid indentation bug
     html_out = '<div class="dashboard-grid">'
     for label, key in [("S&P 500","S&P 500"),("Nasdaq","Nasdaq"),("VIX","VIX"),("Bitcoin","Bitcoin")]:
         v, d = market_data.get(key, (0,0))
@@ -349,14 +361,16 @@ def main():
     # TABS
     tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active", "🛡️ Calc", "📂 Log"])
     
-    # 1. ALERTS TAB (THE HYBRID UI)
+    # 1. ALERTS TAB
     with tab_alerts:
         active = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
         if active.empty:
             st.info("No active alerts")
         else:
-            # TABLE HEADER
-            cols_cfg = [1.4, 1.2, 1.2, 0.7, 0.7] # Strict ratios
+            # HEADER (Strict Ratios)
+            # Ratios: Ticker(1.4), Tgt(1.2), Cur(1.2), Edit(0.7), Del(0.7)
+            cols_cfg = [1.4, 1.2, 1.2, 0.7, 0.7]
+            
             h1, h2, h3, h4, h5 = st.columns(cols_cfg)
             h1.markdown("<div class='tbl-header'>TICKER</div>", unsafe_allow_html=True)
             h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
@@ -370,8 +384,8 @@ def main():
                 tgt = float(row['target_price'])
                 row_col = "#FF4B4B" if curr > tgt else "#00E676"
                 
-                # Top Border
-                st.markdown(f"<div class='row-border' style='background:{row_col}; opacity:0.5;'></div>", unsafe_allow_html=True)
+                # Top Border Color
+                st.markdown(f"<div class='row-border' style='background:{row_col}; opacity:0.6;'></div>", unsafe_allow_html=True)
                 
                 c1, c2, c3, c4, c5 = st.columns(cols_cfg)
                 
@@ -408,7 +422,7 @@ def main():
                         st.success("Saved!")
                         st.rerun()
 
-    # 2. CALCULATOR TAB (RESTORED)
+    # 2. CALCULATOR TAB (FULL)
     with tab_calc:
         st.markdown("### 🧠 Smart SL")
         calc_ticker = st.text_input("Stock Ticker", placeholder="Ticker...", key="calc_t").upper()
@@ -438,7 +452,7 @@ def main():
                     st.session_state.alert_db = pd.concat([st.session_state.alert_db, pd.DataFrame([new])], ignore_index=True)
                     sync_db(st.session_state.alert_db); st.success("Set!"); time.sleep(1); st.rerun()
 
-    # 3. HISTORY TAB (RESTORED)
+    # 3. HISTORY TAB (FULL)
     with tab_hist:
         st.markdown("### 📜 Log")
         hist_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Completed']
