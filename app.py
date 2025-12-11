@@ -236,18 +236,18 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FINAL - PORTRAIT MODE OPTIMIZED)
+# 5. UI & CSS (FIXED HTML RENDER + MOBILE TABLE)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
 
-        /* --- 1. DASHBOARD GRID (LOCKED) --- */
+        /* --- 1. DASHBOARD GRID --- */
         .dashboard-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
+            gap: 8px;
             margin-bottom: 20px;
         }
         @media (min-width: 768px) {
@@ -255,7 +255,7 @@ def apply_custom_ui():
         }
 
         .market-card { 
-            background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 8px 12px;
+            background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px;
             display: flex; flex-direction: row; justify-content: space-between; align-items: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
@@ -263,7 +263,7 @@ def apply_custom_ui():
         .market-value { font-size: 0.9rem; color: #ddd; font-family: monospace; margin: 0 5px; }
         .market-delta { font-size: 0.85rem; font-weight: bold; min-width: 55px; text-align: right; direction: ltr; }
 
-        /* --- 2. INPUT CONTRAST (LOCKED) --- */
+        /* --- 2. INPUT CONTRAST --- */
         input, textarea, select, div[data-baseweb="select"] > div {
             color: #ffffff !important; background-color: #262626 !important; border-color: #555 !important;
         }
@@ -272,46 +272,45 @@ def apply_custom_ui():
         }
         label { color: #cccccc !important; font-weight: 500 !important; }
 
-        /* --- 3. MOBILE TABLE OPTIMIZATIONS (NEW) --- */
+        /* --- 3. MOBILE TABLE OPTIMIZATIONS (CRITICAL FIX) --- */
         
-        /* Eliminate Padding/Margins for Columns to fit mobile */
+        /* Eliminate padding from columns to fit mobile screen */
         div[data-testid="column"] { padding: 0px !important; }
-        div[data-testid="stHorizontalBlock"] { gap: 0px !important; }
+        div[data-testid="stHorizontalBlock"] { gap: 2px !important; }
         .block-container { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
         
-        /* Table Headers */
+        /* Headers */
         .tbl-header { 
             font-size: 0.75rem; color: #888; font-weight: bold; text-transform: uppercase; 
-            text-align: center; margin-bottom: 4px;
+            text-align: center; margin-bottom: 2px;
         }
         
-        /* Table Cells */
+        /* Cells */
         .tbl-cell { 
             font-family: 'Roboto Mono', monospace; font-size: 0.8rem; color: #fff; 
-            padding: 8px 2px; /* Very tight padding */
+            padding: 10px 0;
             text-align: center;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            display: flex; align-items: center; justify-content: center; height: 100%;
         }
         
-        /* Action Buttons - Square & Compact */
+        /* Buttons specific sizing */
         div.stButton > button {
             padding: 0px !important; margin: 0px !important;
-            font-size: 1rem !important; /* Icon size */
+            font-size: 1rem !important;
             line-height: 1 !important;
-            height: 32px !important; width: 100% !important; /* Fill column */
+            height: 36px !important; width: 100% !important;
             border: 1px solid #333 !important; background: #222 !important;
             color: #ccc !important; 
-            border-radius: 6px !important;
+            border-radius: 4px !important;
+            display: flex; justify-content: center; align-items: center;
         }
         div.stButton > button:hover { 
             background: #333 !important; color: #fff !important; border-color: #666 !important;
         }
         
-        /* Table Row Styling */
-        .table-row-sep {
-             height: 1px; background-color: #222; margin: 2px 0;
-        }
+        /* The colored border lines */
+        .border-line-top { width: 100%; height: 1px; margin-bottom: 4px; }
+        .border-line-bottom { width: 100%; height: 1px; margin-top: 4px; margin-bottom: 8px; }
 
     </style>
     """, unsafe_allow_html=True)
@@ -336,9 +335,11 @@ def main():
     with c1: st.markdown("<h3 style='margin:0; color:#FFC107;'>StockPulse</h3>", unsafe_allow_html=True)
     with c2: st.markdown(f"<div style='text-align:right;color:#888;padding-top:8px;'>{datetime.now():%H:%M}</div>", unsafe_allow_html=True)
 
-    # DASHBOARD
+    # --- DASHBOARD (FIXED HTML GENERATION) ---
     market_data = get_market_status()
     metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
+    
+    # IMPORTANT: Building the string linearly to prevent Markdown indentation bug
     html_out = '<div class="dashboard-grid">'
     for label, key in metrics:
         v, d = market_data[key]
@@ -348,7 +349,10 @@ def main():
         if key == "VIX": is_up = False if d >= 0 else True 
         else: is_up = True if d >= 0 else False
         col = "#00E676" if is_up else "#FF4B4B"
+        
+        # Concatenate in one line
         html_out += f'<div class="market-card" style="border-left: 3px solid {col};"><div class="market-title">{label}</div><div class="market-value">{vs}</div><div class="market-delta" style="color:{col}">{ds}</div></div>'
+        
     html_out += '</div>'
     st.markdown(html_out, unsafe_allow_html=True)
 
@@ -379,11 +383,9 @@ def main():
             
             if not active_view.empty:
                 if view_mode == "Table":
-                    # MOBILE OPTIMIZED TABLE
                     with st.container():
-                        # Ratios optimized for Portrait: Ticker(1.3), Tgt(1.2), Cur(1.2), Act(1.6)
-                        # The ACT column needs space for 2 side-by-side buttons
-                        ratios = [1.3, 1.2, 1.2, 1.6]
+                        # STRICT MOBILE RATIOS: [Ticker, Tgt, Cur, Actions(2 buttons)]
+                        ratios = [1.4, 1.2, 1.2, 1.4]
                         
                         # Header
                         h1, h2, h3, h4 = st.columns(ratios)
@@ -392,7 +394,6 @@ def main():
                         h3.markdown("<div class='tbl-header'>Cur</div>", unsafe_allow_html=True)
                         h4.markdown("<div class='tbl-header'>ACT</div>", unsafe_allow_html=True)
                         
-                        # Divider
                         st.markdown("<div style='height:1px; background:#444; margin-bottom:6px;'></div>", unsafe_allow_html=True)
 
                         # Rows
@@ -400,18 +401,18 @@ def main():
                             curr = float(row['current_price'] or 0)
                             tgt = float(row['target_price'])
                             
-                            # Color logic: Red if Curr > Tgt, else Green
+                            # Row Color Logic
                             row_color = "#FF4B4B" if curr > tgt else "#00E676"
                             
-                            # Row Columns
-                            c1, c2, c3, c4 = st.columns(ratios)
+                            # Top Border (Visual)
+                            st.markdown(f"<div class='border-line-top' style='background:{row_color};'></div>", unsafe_allow_html=True)
                             
-                            # Data Cells
+                            # Columns
+                            c1, c2, c3, c4 = st.columns(ratios)
                             c1.markdown(f"<div class='tbl-cell' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
                             c2.markdown(f"<div class='tbl-cell'>{tgt:.1f}</div>", unsafe_allow_html=True)
                             c3.markdown(f"<div class='tbl-cell' style='color:#aaa;'>{curr:.1f}</div>", unsafe_allow_html=True)
                             
-                            # Action Buttons (Side by Side)
                             with c4:
                                 b1, b2 = st.columns(2)
                                 with b1:
@@ -421,12 +422,11 @@ def main():
                                         st.session_state.edit_note = row['notes']
                                         st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
                                 with b2:
-                                    # TRASH CAN ICON
                                     if st.button("🗑️", key=f"del_{idx}"):
                                         st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
                             
-                            # Colored Separator to simulate border
-                            st.markdown(f"<div style='height:1px; background:{row_color}; margin: 4px 0; opacity: 0.6;'></div>", unsafe_allow_html=True)
+                            # Bottom Border (Visual)
+                            st.markdown(f"<div class='border-line-bottom' style='background:{row_color};'></div>", unsafe_allow_html=True)
 
                 else: 
                     # Card View
