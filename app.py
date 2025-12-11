@@ -12,6 +12,7 @@ import math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import numpy as np 
+import textwrap # נועד לנקות את הרווחים מה-HTML
 
 # ==========================================
 # 0. CONFIGURATION & SECRETS
@@ -88,59 +89,50 @@ def is_duplicate_alert(ticker, target, direction):
     except: return False
 
 def get_market_status():
-    """Fetches market data with strict NaN handling"""
     tickers = {'S&P 500': '^GSPC', 'Nasdaq': '^IXIC', 'VIX': '^VIX', 'Bitcoin': 'BTC-USD'}
     results = {}
-    
     for name, symbol in tickers.items():
         try:
             ticker = yf.Ticker(symbol)
             hist = ticker.history(period="5d")
-            
             if hist.empty:
                  results[name] = (0.0, 0.0)
                  continue
-
             price = hist['Close'].iloc[-1]
             if len(hist) >= 2:
                 prev_close = hist['Close'].iloc[-2]
                 delta = ((price - prev_close) / prev_close) * 100
             else:
                 delta = 0.0
-
-            # --- STRICT NAN CLEANING ---
-            try:
-                price = float(price)
-                if math.isnan(price): price = 0.0
-            except: price = 0.0
             
-            try:
-                delta = float(delta)
-                if math.isnan(delta): delta = 0.0
+            # Safe Float Conversion
+            try: price = float(price) 
+            except: price = 0.0
+            if math.isnan(price): price = 0.0
+            
+            try: delta = float(delta) 
             except: delta = 0.0
+            if math.isnan(delta): delta = 0.0
 
             results[name] = (price, delta)
         except Exception as e:
             results[name] = (0.0, 0.0)
-            
     return results
 
 # ==========================================
-# 3. ANALYSIS FUNCTIONS
+# 3. ANALYSIS & NOTIFICATIONS
 # ==========================================
 def calculate_smart_sl(ticker, buy_price):
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="1y")
         if len(hist) < 150: return None, "Not enough data for MA150"
-        
         hist['MA150'] = hist['Close'].rolling(window=150).mean()
         high_low = hist['High'] - hist['Low']
         high_close = (hist['High'] - hist['Close'].shift()).abs()
         low_close = (hist['Low'] - hist['Close'].shift()).abs()
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         hist['ATR'] = tr.rolling(window=14).mean()
-        
         latest = hist.iloc[-1]
         ma150 = latest['MA150']
         atr = latest['ATR']
@@ -168,9 +160,6 @@ def calculate_smart_sl(ticker, buy_price):
         return {"ma150": ma150, "atr": atr, "trend": trend, "sl_price": final_sl, "current_price": curr_price, "reason": reason, "entry": entry}, None
     except Exception as e: return None, str(e)
 
-# ==========================================
-# 4. NOTIFICATIONS
-# ==========================================
 def send_email_alert(to_email, ticker, current_price, target_price, direction, notes):
     if not SENDER_EMAIL or not SENDER_PASSWORD: return False, "Secrets missing"
     try:
@@ -260,7 +249,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FINAL FIXES)
+# 5. UI & CSS (FIXED)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -268,9 +257,9 @@ def apply_custom_ui():
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
 
         /* --- DASHBOARD GRID CSS --- */
-        .dashboard-grid {
+        .dashboard-container {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr; /* Force 2 columns */
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -282,14 +271,14 @@ def apply_custom_ui():
             text-align: center;
         }
         .dashboard-title {
-            color: #e0e0e0;
+            color: #dcdcdc; /* Light Grey/Silver */
             font-size: 0.8rem;
             font-weight: bold;
             text-transform: uppercase;
         }
         .dashboard-value {
-            color: #ffffff;
-            font-size: 1.4rem;
+            color: #ffffff; /* Pure White */
+            font-size: 1.5rem;
             font-weight: 800;
         }
         .dashboard-delta {
@@ -297,37 +286,37 @@ def apply_custom_ui():
             font-weight: bold;
         }
 
-        /* --- FORCE TABLE ROW ON MOBILE (CRITICAL) --- */
+        /* --- MOBILE TABLE FIX (NO STACKING) --- */
         @media (max-width: 640px) {
-            /* This forces the Streamlit columns container to stay horizontal */
+            /* Force horizontal layout for columns even on mobile */
             div[data-testid="stHorizontalBlock"] {
                 flex-direction: row !important;
                 flex-wrap: nowrap !important;
-                gap: 2px !important;
+                overflow-x: auto !important; /* Allow scroll if too tight */
             }
-            /* This allows the columns to shrink to fit */
             div[data-testid="column"] {
-                flex: 1 !important;
-                min-width: 0px !important;
+                flex: 1 0 auto !important; /* Do not shrink to zero */
                 width: auto !important;
+                min-width: 50px !important;
+                padding: 0 2px !important;
             }
         }
 
-        /* --- COMPACT BUTTONS --- */
+        /* Compact Buttons */
         div.stButton > button {
             width: 100% !important;
             padding: 0px !important;
             font-size: 0.75rem !important;
-            height: 26px !important;
-            line-height: 26px !important;
+            height: 28px !important;
+            line-height: 28px !important;
             margin: 0px !important;
             border: 1px solid #444 !important;
         }
         
         .tbl-header { font-size: 0.7rem; color: #ccc; font-weight: bold; }
-        .compact-text { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 4px; font-family: monospace; }
-
-        /* Inputs */
+        .compact-text { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 6px; font-family: monospace; }
+        
+        /* Input Fields */
         div[data-baseweb="input"] > div, 
         div[data-baseweb="select"] > div {
             background-color: #262730 !important;
@@ -335,10 +324,10 @@ def apply_custom_ui():
             border: 1px solid #555 !important;
         }
         input { color: #ffffff !important; }
-        
+
+        /* Tabs */
         button[data-baseweb="tab"] { color: white !important; font-weight: bold; }
         button[data-baseweb="tab"][aria-selected="true"] { color: #FFC107 !important; border-bottom-color: #FFC107 !important; }
-
     </style>
     """, unsafe_allow_html=True)
 
@@ -369,19 +358,19 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- DASHBOARD (PURE HTML GRID 2x2) ---
+    # --- DASHBOARD (FIXED INDENTATION & LAYOUT) ---
     with st.container():
         st.markdown("### 🌍 Market")
         
         market_data = get_market_status()
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
         
-        # Build HTML for Grid
-        grid_html = '<div class="dashboard-grid">'
+        # We construct the HTML string CAREFULLY using textwrap.dedent
+        # to ensure no whitespace issues causing code-block rendering.
+        cards_html = ""
         for label, key in metrics:
             val, delta = market_data[key]
             
-            # Logic & Colors
             if val == 0.0:
                 display_val = "0.00"
                 display_delta = "0.00%"
@@ -391,19 +380,24 @@ def main():
                 display_delta = f"{delta:.2f}%"
                 color_delta = "#4CAF50" # Green
                 if delta < 0: color_delta = "#FF4B4B" # Red
-                if key == "VIX": color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50" # VIX logic
+                if key == "VIX": color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50"
 
-            grid_html += f"""
+            cards_html += f"""
             <div class="dashboard-card">
                 <div class="dashboard-title">{label}</div>
                 <div class="dashboard-value">{display_val}</div>
                 <div style="color: {color_delta};" class="dashboard-delta">{display_delta}</div>
             </div>
             """
-        grid_html += '</div>'
         
-        # RENDER HTML (CORRECTLY)
-        st.markdown(grid_html, unsafe_allow_html=True)
+        # Wrap in container
+        final_html = f"""
+        <div class="dashboard-container">
+            {cards_html}
+        </div>
+        """
+        
+        st.markdown(textwrap.dedent(final_html), unsafe_allow_html=True)
         st.markdown("---")
 
     # --- SETTINGS ---
@@ -434,9 +428,9 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW (FIXED FOR MOBILE ROW) ---
+                # --- TABLE VIEW ---
                 if view_mode == "📄 Table":
-                    # Tighter columns
+                    # Headers
                     h1, h2, h3, h4 = st.columns([1, 1, 1, 0.9]) 
                     h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
                     h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
