@@ -8,7 +8,7 @@ from email.mime.multipart import MIMEMultipart
 from twilio.rest import Client
 import re
 import time
-import math # Added for NaN checking
+import math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import numpy as np 
@@ -274,16 +274,18 @@ def apply_custom_ui():
             border: 1px solid #333;
             border-radius: 8px;
             padding: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
         }
         /* Label (Top text) */
         div[data-testid="stMetricLabel"] p {
-            color: #b0b0b0 !important; /* Silver */
-            font-size: 0.9rem !important;
+            color: #dcdcdc !important; /* Lighter Silver for readability */
+            font-size: 0.85rem !important;
+            font-weight: 500 !important;
         }
         /* Value (Middle text) */
         div[data-testid="stMetricValue"] {
-            color: #ffffff !important; /* Bright White */
-            font-size: 1.8rem !important;
+            color: #ffffff !important; /* PURE WHITE */
+            font-size: 1.6rem !important;
             font-weight: 700 !important;
         }
         /* Delta (Bottom text) */
@@ -292,48 +294,58 @@ def apply_custom_ui():
             font-weight: bold !important;
         }
 
-        /* --- TABS --- */
-        button[data-baseweb="tab"] {
-            color: #ffffff !important;
-            font-size: 1rem !important;
-            font-weight: bold !important;
-        }
-        button[data-baseweb="tab"][aria-selected="true"] {
-            color: #FFC107 !important;
-            border-bottom-color: #FFC107 !important;
-        }
-
-        /* --- MOBILE TABLE ROW --- */
-        /* Use a custom class for row text to force single line */
-        .row-text {
-            font-family: 'Roboto', sans-serif;
-            color: #ffffff;
-            font-size: 0.95rem;
-            white-space: nowrap; /* Forces text to stay on one line */
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            height: 100%;
-            padding-top: 4px;
-        }
-        .row-item {
-            margin-right: 10px;
-        }
-        .row-ticker {
-            font-weight: bold;
-            color: #FFC107;
-            width: 50px;
+        /* --- MOBILE TABLE FIXES (CRITICAL) --- */
+        /* Force columns to NOT wrap on mobile */
+        [data-testid="column"] {
+            width: auto !important;
+            flex: 1 !important;
+            min-width: 0px !important; /* Forces columns to shrink instead of stack */
+            padding: 0 2px !important; /* Tight spacing */
         }
         
+        /* Ensure font size scales down on mobile */
+        .compact-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 0.85rem;
+            margin-top: 4px;
+            text-align: left;
+            font-family: monospace;
+        }
+        
+        /* Headers styling */
+        .tbl-header {
+            font-size: 0.75rem;
+            color: #aaa;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
         /* --- BUTTONS --- */
         div.stButton > button {
-            width: auto !important;
-            padding: 2px 8px !important;
+            width: 100% !important;
+            padding: 0px !important;
             font-size: 0.8rem !important;
-            height: 30px !important;
+            height: 28px !important;
+            line-height: 28px !important;
             margin: 0px !important;
         }
 
+        /* Hide Streamlit element spacing */
+        div[data-testid="column"] > div > div > div {
+            gap: 0.2rem !important;
+        }
+        
+        /* High Contrast Inputs */
+        div[data-baseweb="input"] > div, 
+        div[data-baseweb="select"] > div {
+            background-color: #262730 !important;
+            color: #ffffff !important;
+            border: 1px solid #555 !important;
+        }
+        input { color: #ffffff !important; }
+        
     </style>
     """, unsafe_allow_html=True)
 
@@ -355,12 +367,12 @@ def main():
     # --- HEADER ---
     c_title, c_time = st.columns([3, 1])
     with c_title:
-        st.markdown("<h1 style='text-align: left; margin:0; color: #FFC107;'>⚡ StockPulse</h1>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: left; margin:0; color: #FFC107;'>⚡ StockPulse</h3>", unsafe_allow_html=True)
     with c_time:
         current_time = datetime.now().strftime("%d/%m %H:%M")
         st.markdown(f"""
-        <div style="text-align: right; padding-top:10px;">
-            <small style="color: #aaa;">UPDATED: <span style="color: #4CAF50;">{current_time}</span></small>
+        <div style="text-align: right; padding-top:5px;">
+            <small style="color: #aaa;">{current_time}</small>
         </div>
         """, unsafe_allow_html=True)
 
@@ -373,8 +385,8 @@ def main():
         for i, (label, key) in enumerate(metrics):
             val, delta = market_data[key]
             
-            # Formatting
-            if val == 0:
+            # Strict formatting to avoid 'nan'
+            if val == 0.0:
                 display_val = "0.00"
                 display_delta = "0.00%"
             else:
@@ -413,35 +425,27 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW (FIXED FOR MOBILE) ---
+                # --- TABLE VIEW (OPTIMIZED FOR MOBILE SINGLE LINE) ---
                 if view_mode == "📄 Table":
-                    # Simple Header
-                    st.markdown("""
-                    <div style="display:flex; justify-content:space-between; color:#aaa; font-size:0.8rem; margin-bottom:5px; padding-left:5px; border-bottom:1px solid #444;">
-                        <span style="width:50px;">SYM</span>
-                        <span>TARGET</span>
-                        <span>CURR</span>
-                        <span style="width:60px; text-align:right;">ACT</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    # Headers: Ticker | Target | Current | Actions
+                    # Ratios: 1.2 | 1.2 | 1.2 | 1.0 -> Must be tight
+                    h1, h2, h3, h4 = st.columns([1.2, 1.2, 1.2, 1]) 
+                    h1.markdown("<span class='tbl-header'>SYM</span>", unsafe_allow_html=True)
+                    h2.markdown("<span class='tbl-header'>TGT</span>", unsafe_allow_html=True)
+                    h3.markdown("<span class='tbl-header'>CUR</span>", unsafe_allow_html=True)
+                    h4.markdown("<span class='tbl-header'>ACT</span>", unsafe_allow_html=True)
+                    st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        # Create 2 main columns: Data (75%) | Actions (25%)
-                        # This prevents Streamlit from stacking individual data points vertically
-                        c_data, c_actions = st.columns([3, 1])
+                        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
                         
-                        with c_data:
-                            # Use HTML Flexbox to keep text on one line
-                            st.markdown(f"""
-                            <div class='row-text'>
-                                <span class='row-ticker'>{row['ticker']}</span>
-                                <span class='row-item'>${float(row['target_price']):.1f}</span>
-                                <span class='row-item' style='color:#aaa;'>${float(row['current_price']):.1f}</span>
-                            </div>
-                            """, unsafe_allow_html=True)
+                        # Data Columns (using HTML for font control)
+                        with c1: st.markdown(f"<div class='compact-text' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
+                        with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
+                        with c3: st.markdown(f"<div class='compact-text' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
                         
-                        with c_actions:
-                            # Buttons next to each other
+                        # Action Column (Nested columns for buttons side-by-side)
+                        with c4:
                             b_edit, b_del = st.columns([1, 1], gap="small")
                             with b_edit:
                                 if st.button("✏️", key=f"te_{idx}"):
@@ -458,7 +462,7 @@ def main():
                                     st.session_state.alert_db.reset_index(drop=True, inplace=True)
                                     sync_db(st.session_state.alert_db)
                                     st.rerun()
-                        st.markdown("<hr style='margin: 0px 0 5px 0; border-color: #333;'>", unsafe_allow_html=True)
+                        st.markdown("<hr style='margin: 4px 0; border-color: #333;'>", unsafe_allow_html=True)
 
                 # --- CARD VIEW ---
                 else:
