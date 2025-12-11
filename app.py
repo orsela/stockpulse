@@ -236,7 +236,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FIXING THE MOBILE STACKING)
+# 5. UI & CSS (THE NUCLEAR "NO-WRAP" FIX)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -266,43 +266,47 @@ def apply_custom_ui():
         }
         label { color: #888 !important; }
 
-        /* --- CRITICAL: FORCE COLUMNS TO STAY IN ONE ROW ON MOBILE --- */
+        /* --- CRITICAL: FORCE ROW LAYOUT ON MOBILE --- */
         
-        /* 1. Prevent wrapping in horizontal blocks */
+        /* 1. FORCE FLEX DIRECTION ROW (Disable mobile stacking) */
         div[data-testid="stHorizontalBlock"] {
-            flex-wrap: nowrap !important;
-            overflow-x: auto !important;
+            display: flex !important;
+            flex-direction: row !important; /* Forces row direction even on phone */
+            flex-wrap: nowrap !important;   /* Disables wrapping */
             gap: 2px !important;
         }
         
-        /* 2. Force columns to shrink and not stack */
+        /* 2. ALLOW COLUMNS TO SHRINK INDEFINITELY */
         div[data-testid="column"] {
-            min-width: 0px !important; /* This allows columns to shrink below "minimum" size */
+            min-width: 0px !important;      /* Override Streamlit's minimum width */
             width: auto !important;
-            flex: 1 1 0px !important;
+            flex: 1 1 auto !important;      /* Grow and Shrink as needed */
             padding: 0px !important;
+            overflow: hidden !important;    /* Clip content if needed, don't break layout */
         }
         
         /* Table Headers */
         .tbl-header { 
-            font-size: 0.7rem; color: #888; font-weight: bold; text-transform: uppercase; 
+            font-size: 0.65rem; color: #888; font-weight: bold; text-transform: uppercase; 
             text-align: center; background: #161616; padding: 6px 0; border-bottom: 1px solid #333;
+            white-space: nowrap;
         }
         
-        /* Table Cells (HTML Injection) */
+        /* Table Cells */
         .tbl-cell { 
-            font-family: 'Roboto Mono', monospace; font-size: 0.85rem; color: #fff; 
+            font-family: 'Roboto Mono', monospace; font-size: 0.8rem; color: #fff; 
             padding: 10px 0; text-align: center; height: 40px; display: flex; align-items: center; justify-content: center;
         }
         
-        /* Buttons (Streamlit Native override) */
+        /* Buttons (Streamlit Native override - Minimalist) */
         div.stButton > button {
             padding: 0px !important; margin: 0px !important;
-            font-size: 1rem !important; line-height: 1 !important;
+            font-size: 0.9rem !important; line-height: 1 !important;
             height: 40px !important; width: 100% !important;
             border: none !important; background: transparent !important;
             color: #666 !important; border-radius: 0 !important;
             border-left: 1px solid #222 !important;
+            min-width: 0px !important; /* Allow button to be tiny */
         }
         div.stButton > button:hover { background: #222 !important; color: #fff !important; }
         
@@ -313,7 +317,7 @@ def apply_custom_ui():
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 6. MAIN APP (FULL LOGIC + UI)
+# 6. MAIN APP
 # ==========================================
 def main():
     apply_custom_ui()
@@ -334,6 +338,7 @@ def main():
 
     # DASHBOARD
     market_data = get_market_status()
+    # Linear HTML construction
     html_out = '<div class="dashboard-grid">'
     for label, key in [("S&P 500","S&P 500"),("Nasdaq","Nasdaq"),("VIX","VIX"),("Bitcoin","Bitcoin")]:
         v, d = market_data.get(key, (0,0))
@@ -367,9 +372,9 @@ def main():
         if active.empty:
             st.info("No active alerts")
         else:
-            # HEADER (Strict Ratios)
-            # Ratios: Ticker(1.4), Tgt(1.2), Cur(1.2), Edit(0.7), Del(0.7)
-            cols_cfg = [1.4, 1.2, 1.2, 0.7, 0.7]
+            # HEADER (Fixed Ratios for Mobile)
+            # Ratios tuned to squeeze everything in
+            cols_cfg = [1.5, 1.2, 1.2, 0.6, 0.6]
             
             h1, h2, h3, h4, h5 = st.columns(cols_cfg)
             h1.markdown("<div class='tbl-header'>TICKER</div>", unsafe_allow_html=True)
@@ -384,7 +389,7 @@ def main():
                 tgt = float(row['target_price'])
                 row_col = "#FF4B4B" if curr > tgt else "#00E676"
                 
-                # Top Border Color
+                # Top Border
                 st.markdown(f"<div class='row-border' style='background:{row_col}; opacity:0.6;'></div>", unsafe_allow_html=True)
                 
                 c1, c2, c3, c4, c5 = st.columns(cols_cfg)
