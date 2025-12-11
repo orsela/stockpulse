@@ -260,56 +260,74 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (BULLETPROOF MOBILE FIXES)
+# 5. UI & CSS (FINAL FIXES)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
 
-        /* --- FORCING COLUMNS TO STAY IN ROW ON MOBILE --- */
-        /* This is the critical fix for the table stacking issue */
-        div[data-testid="stHorizontalBlock"] {
-            flex-direction: row !important;
-            flex-wrap: nowrap !important;
+        /* --- DASHBOARD GRID CSS --- */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
         }
-        
-        div[data-testid="column"] {
-            flex: 1 !important;
-            min-width: 0px !important; /* Allow shrinking */
-            width: auto !important;
-            padding: 0 2px !important;
+        .dashboard-card {
+            background-color: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+        .dashboard-title {
+            color: #e0e0e0;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .dashboard-value {
+            color: #ffffff;
+            font-size: 1.4rem;
+            font-weight: 800;
+        }
+        .dashboard-delta {
+            font-size: 0.8rem;
+            font-weight: bold;
         }
 
-        /* --- BUTTONS --- */
+        /* --- FORCE TABLE ROW ON MOBILE (CRITICAL) --- */
+        @media (max-width: 640px) {
+            /* This forces the Streamlit columns container to stay horizontal */
+            div[data-testid="stHorizontalBlock"] {
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                gap: 2px !important;
+            }
+            /* This allows the columns to shrink to fit */
+            div[data-testid="column"] {
+                flex: 1 !important;
+                min-width: 0px !important;
+                width: auto !important;
+            }
+        }
+
+        /* --- COMPACT BUTTONS --- */
         div.stButton > button {
             width: 100% !important;
             padding: 0px !important;
             font-size: 0.75rem !important;
-            height: 28px !important;
-            line-height: 28px !important;
+            height: 26px !important;
+            line-height: 26px !important;
             margin: 0px !important;
+            border: 1px solid #444 !important;
         }
         
-        /* Headers styling */
-        .tbl-header {
-            font-size: 0.7rem;
-            color: #ccc;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-        
-        /* Text styling */
-        .compact-text {
-            font-size: 0.8rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            padding-top: 6px;
-            font-family: monospace;
-        }
+        .tbl-header { font-size: 0.7rem; color: #ccc; font-weight: bold; }
+        .compact-text { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 4px; font-family: monospace; }
 
-        /* High Contrast Inputs */
+        /* Inputs */
         div[data-baseweb="input"] > div, 
         div[data-baseweb="select"] > div {
             background-color: #262730 !important;
@@ -318,7 +336,6 @@ def apply_custom_ui():
         }
         input { color: #ffffff !important; }
         
-        /* Tabs */
         button[data-baseweb="tab"] { color: white !important; font-weight: bold; }
         button[data-baseweb="tab"][aria-selected="true"] { color: #FFC107 !important; border-bottom-color: #FFC107 !important; }
 
@@ -352,19 +369,15 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- DASHBOARD (PURE HTML GRID - BULLETPROOF 2x2) ---
+    # --- DASHBOARD (PURE HTML GRID 2x2) ---
     with st.container():
         st.markdown("### 🌍 Market")
         
-        # 1. Fetch Data
         market_data = get_market_status()
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
         
-        # 2. Build HTML Grid manually to force 2x2 on mobile
-        html_content = """
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px;">
-        """
-        
+        # Build HTML for Grid
+        grid_html = '<div class="dashboard-grid">'
         for label, key in metrics:
             val, delta = market_data[key]
             
@@ -376,26 +389,21 @@ def main():
             else:
                 display_val = f"{val:,.2f}" if key == "VIX" else f"{val:,.0f}"
                 display_delta = f"{delta:.2f}%"
-                
-                # Colors
                 color_delta = "#4CAF50" # Green
                 if delta < 0: color_delta = "#FF4B4B" # Red
-                if key == "VIX": # Invert VIX colors
-                     color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50"
+                if key == "VIX": color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50" # VIX logic
 
-            # Individual Card HTML
-            html_content += f"""
-            <div style="background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; text-align: center;">
-                <div style="color: #e0e0e0; font-size: 0.75rem; font-weight: bold; text-transform: uppercase;">{label}</div>
-                <div style="color: #ffffff; font-size: 1.3rem; font-weight: 800; margin: 2px 0;">{display_val}</div>
-                <div style="color: {color_delta}; font-size: 0.8rem; font-weight: bold;">{display_delta}</div>
+            grid_html += f"""
+            <div class="dashboard-card">
+                <div class="dashboard-title">{label}</div>
+                <div class="dashboard-value">{display_val}</div>
+                <div style="color: {color_delta};" class="dashboard-delta">{display_delta}</div>
             </div>
             """
+        grid_html += '</div>'
         
-        html_content += "</div>"
-        
-        # 3. Render
-        st.markdown(html_content, unsafe_allow_html=True)
+        # RENDER HTML (CORRECTLY)
+        st.markdown(grid_html, unsafe_allow_html=True)
         st.markdown("---")
 
     # --- SETTINGS ---
@@ -426,11 +434,10 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW ---
+                # --- TABLE VIEW (FIXED FOR MOBILE ROW) ---
                 if view_mode == "📄 Table":
-                    # Headers
-                    # We use tighter ratios to ensure it fits
-                    h1, h2, h3, h4 = st.columns([1, 1, 1, 0.8]) 
+                    # Tighter columns
+                    h1, h2, h3, h4 = st.columns([1, 1, 1, 0.9]) 
                     h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
                     h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
                     h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
@@ -438,15 +445,12 @@ def main():
                     st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        # Rows
-                        c1, c2, c3, c4 = st.columns([1, 1, 1, 0.8])
+                        c1, c2, c3, c4 = st.columns([1, 1, 1, 0.9])
                         
-                        # Data
                         with c1: st.markdown(f"<div class='compact-text' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
                         with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
                         with c3: st.markdown(f"<div class='compact-text' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
                         
-                        # Buttons
                         with c4:
                             b_edit, b_del = st.columns([1, 1], gap="small")
                             with b_edit:
