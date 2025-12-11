@@ -8,6 +8,7 @@ from email.mime.multipart import MIMEMultipart
 from twilio.rest import Client
 import re
 import time
+import math # Added for NaN checking
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import numpy as np 
@@ -87,7 +88,7 @@ def is_duplicate_alert(ticker, target, direction):
     except: return False
 
 def get_market_status():
-    """Fetches market data, with strict NaN handling"""
+    """Fetches market data with strict NaN handling"""
     tickers = {'S&P 500': '^GSPC', 'Nasdaq': '^IXIC', 'VIX': '^VIX', 'Bitcoin': 'BTC-USD'}
     results = {}
     
@@ -100,10 +101,7 @@ def get_market_status():
                  results[name] = (0.0, 0.0)
                  continue
 
-            # Get Last Price
             price = hist['Close'].iloc[-1]
-            
-            # Calculate Delta
             if len(hist) >= 2:
                 prev_close = hist['Close'].iloc[-2]
                 delta = ((price - prev_close) / prev_close) * 100
@@ -111,9 +109,16 @@ def get_market_status():
                 delta = 0.0
 
             # --- STRICT NAN CLEANING ---
-            # Convert to standard python float, replacing nan/inf with 0.0
-            price = float(np.nan_to_num(price))
-            delta = float(np.nan_to_num(delta))
+            # Ensure price is a float and not NaN
+            try:
+                price = float(price)
+                if math.isnan(price): price = 0.0
+            except: price = 0.0
+            
+            try:
+                delta = float(delta)
+                if math.isnan(delta): delta = 0.0
+            except: delta = 0.0
 
             results[name] = (price, delta)
         except Exception as e:
@@ -256,84 +261,77 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FINAL HIGH CONTRAST)
+# 5. UI & CSS (FINAL FIXED VISUALS)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
         
-        /* Inputs & Selects */
-        div[data-baseweb="input"] > div, 
-        div[data-baseweb="select"] > div, 
-        div[data-testid="stNumberInput"] div[data-baseweb="input"] > div {
-            background-color: #262730 !important;
-            color: #ffffff !important;
-            border: 1px solid #555 !important;
-        }
-        input[type="text"], input[type="number"] { color: #ffffff !important; caret-color: #ffffff !important; }
-        div[data-baseweb="select"] span { color: #ffffff !important; }
-        label { color: #ffc107 !important; font-weight: bold !important; }
-
-        /* --- DASHBOARD METRICS: HIGH CONTRAST --- */
+        /* --- DASHBOARD HIGH CONTRAST --- */
         div[data-testid="metric-container"] {
-            background-color: #1c1c1e;
+            background-color: #1a1a1a;
             border: 1px solid #333;
             border-radius: 8px;
-            padding: 15px; 
-            color: #ffffff;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            padding: 10px;
         }
-        
-        /* LABEL (e.g. S&P 500) */
+        /* Label (Top text) */
         div[data-testid="stMetricLabel"] p {
-            color: #d0d0d0 !important; /* Light Silver */
-            font-size: 1rem !important;
-            font-weight: 600 !important;
+            color: #b0b0b0 !important; /* Silver */
+            font-size: 0.9rem !important;
         }
-        
-        /* VALUE (e.g. 6,856.00) */
+        /* Value (Middle text) */
         div[data-testid="stMetricValue"] {
-            color: #ffffff !important; /* PURE WHITE */
-            font-size: 2rem !important;
+            color: #ffffff !important; /* Bright White */
+            font-size: 1.8rem !important;
             font-weight: 700 !important;
-            text-shadow: 0px 0px 10px rgba(255, 255, 255, 0.1);
         }
-
-        /* DELTA (e.g. -0.52%) - Streamlit handles color, we boost visibility */
+        /* Delta (Bottom text) */
         div[data-testid="stMetricDelta"] {
-            font-size: 1rem !important;
+            font-size: 0.9rem !important;
             font-weight: bold !important;
         }
 
-        /* TABS Styling */
+        /* --- TABS --- */
         button[data-baseweb="tab"] {
-            color: #ffffff !important; 
+            color: #ffffff !important;
+            font-size: 1rem !important;
             font-weight: bold !important;
         }
         button[data-baseweb="tab"][aria-selected="true"] {
-            color: #FFC107 !important; 
+            color: #FFC107 !important;
             border-bottom-color: #FFC107 !important;
         }
 
-        /* COMPACT BUTTONS IN TABLE */
-        div.stButton > button {
-            width: auto !important;
-            padding: 0px 8px !important; /* Extremely tight padding */
-            font-size: 0.85rem !important;
-            min-height: 0px !important;
-            height: 28px !important; /* Fixed small height */
-            line-height: 28px !important;
-            margin-top: 0px !important;
+        /* --- MOBILE TABLE ROW --- */
+        /* Use a custom class for row text to force single line */
+        .row-text {
+            font-family: 'Roboto', sans-serif;
+            color: #ffffff;
+            font-size: 0.95rem;
+            white-space: nowrap; /* Forces text to stay on one line */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 100%;
+            padding-top: 4px;
+        }
+        .row-item {
+            margin-right: 10px;
+        }
+        .row-ticker {
+            font-weight: bold;
+            color: #FFC107;
+            width: 50px;
         }
         
-        /* Layout tweak for mobile wrapping */
-        .compact-text {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            font-size: 0.95rem;
-            margin-top: 4px;
+        /* --- BUTTONS --- */
+        div.stButton > button {
+            width: auto !important;
+            padding: 2px 8px !important;
+            font-size: 0.8rem !important;
+            height: 30px !important;
+            margin: 0px !important;
         }
 
     </style>
@@ -366,7 +364,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- MARKET DASHBOARD ---
+    # --- DASHBOARD (FIXED CONTRAST & NAN) ---
     with st.container():
         st.markdown("### 🌍 Market")
         m_cols = st.columns(4)
@@ -375,11 +373,13 @@ def main():
         for i, (label, key) in enumerate(metrics):
             val, delta = market_data[key]
             
-            # Formatting with 0.00 fallback for visual consistency
-            display_val = f"{val:,.0f}" if val > 0 else "0"
-            if key == "VIX": display_val = f"{val:,.2f}" # VIX needs decimals
-            
-            display_delta = f"{delta:.2f}%" 
+            # Formatting
+            if val == 0:
+                display_val = "0.00"
+                display_delta = "0.00%"
+            else:
+                display_val = f"{val:,.2f}" if key == "VIX" else f"{val:,.0f}"
+                display_delta = f"{delta:.2f}%"
             
             with m_cols[i]:
                 st.metric(label=label, value=display_val, delta=display_delta)
@@ -413,25 +413,35 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW ---
+                # --- TABLE VIEW (FIXED FOR MOBILE) ---
                 if view_mode == "📄 Table":
-                    # Headers
-                    h1, h2, h3, h4 = st.columns([1.5, 2, 1.5, 1.5]) 
-                    h1.markdown("**Sym**")
-                    h2.markdown("**Tgt**")
-                    h3.markdown("**Cur**")
-                    h4.markdown("**Act**")
-                    st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
+                    # Simple Header
+                    st.markdown("""
+                    <div style="display:flex; justify-content:space-between; color:#aaa; font-size:0.8rem; margin-bottom:5px; padding-left:5px; border-bottom:1px solid #444;">
+                        <span style="width:50px;">SYM</span>
+                        <span>TARGET</span>
+                        <span>CURR</span>
+                        <span style="width:60px; text-align:right;">ACT</span>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        # Columns
-                        c1, c2, c3, c4 = st.columns([1.5, 2, 1.5, 1.5])
+                        # Create 2 main columns: Data (75%) | Actions (25%)
+                        # This prevents Streamlit from stacking individual data points vertically
+                        c_data, c_actions = st.columns([3, 1])
                         
-                        with c1: st.markdown(f"<div class='compact-text'><b>{row['ticker']}</b></div>", unsafe_allow_html=True)
-                        with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
-                        with c3: st.markdown(f"<div class='compact-text'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
-                        with c4:
-                            # TIGHT BUTTONS
+                        with c_data:
+                            # Use HTML Flexbox to keep text on one line
+                            st.markdown(f"""
+                            <div class='row-text'>
+                                <span class='row-ticker'>{row['ticker']}</span>
+                                <span class='row-item'>${float(row['target_price']):.1f}</span>
+                                <span class='row-item' style='color:#aaa;'>${float(row['current_price']):.1f}</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with c_actions:
+                            # Buttons next to each other
                             b_edit, b_del = st.columns([1, 1], gap="small")
                             with b_edit:
                                 if st.button("✏️", key=f"te_{idx}"):
@@ -448,7 +458,7 @@ def main():
                                     st.session_state.alert_db.reset_index(drop=True, inplace=True)
                                     sync_db(st.session_state.alert_db)
                                     st.rerun()
-                        st.markdown("<hr style='margin: 4px 0; border-color: #333;'>", unsafe_allow_html=True)
+                        st.markdown("<hr style='margin: 0px 0 5px 0; border-color: #333;'>", unsafe_allow_html=True)
 
                 # --- CARD VIEW ---
                 else:
