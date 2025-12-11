@@ -109,7 +109,6 @@ def get_market_status():
                 delta = 0.0
 
             # --- STRICT NAN CLEANING ---
-            # Ensure price is a float and not NaN
             try:
                 price = float(price)
                 if math.isnan(price): price = 0.0
@@ -261,65 +260,59 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FINAL FIXED VISUALS)
+# 5. UI & CSS (MOBILE GRID FIXES)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
         
-        /* --- DASHBOARD HIGH CONTRAST --- */
-        div[data-testid="metric-container"] {
+        /* --- DASHBOARD GRID --- */
+        /* Custom Grid Class for 2x2 layout */
+        .market-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .market-card {
             background-color: #1a1a1a;
             border: 1px solid #333;
             border-radius: 8px;
             padding: 10px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            text-align: center;
         }
-        /* Label (Top text) */
-        div[data-testid="stMetricLabel"] p {
-            color: #dcdcdc !important; /* Lighter Silver for readability */
-            font-size: 0.85rem !important;
-            font-weight: 500 !important;
-        }
-        /* Value (Middle text) */
-        div[data-testid="stMetricValue"] {
-            color: #ffffff !important; /* PURE WHITE */
-            font-size: 1.6rem !important;
-            font-weight: 700 !important;
-        }
-        /* Delta (Bottom text) */
-        div[data-testid="stMetricDelta"] {
-            font-size: 0.9rem !important;
-            font-weight: bold !important;
-        }
-
-        /* --- MOBILE TABLE FIXES (CRITICAL) --- */
-        /* Force columns to NOT wrap on mobile */
-        [data-testid="column"] {
-            width: auto !important;
-            flex: 1 !important;
-            min-width: 0px !important; /* Forces columns to shrink instead of stack */
-            padding: 0 2px !important; /* Tight spacing */
-        }
-        
-        /* Ensure font size scales down on mobile */
-        .compact-text {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            font-size: 0.85rem;
-            margin-top: 4px;
-            text-align: left;
-            font-family: monospace;
-        }
-        
-        /* Headers styling */
-        .tbl-header {
-            font-size: 0.75rem;
-            color: #aaa;
+        .market-title {
+            color: #ffffff !important; /* FIXED: Bright White Title */
+            font-size: 0.8rem;
             font-weight: bold;
             text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .market-value {
+            color: #ffffff;
+            font-size: 1.4rem;
+            font-weight: 800;
+        }
+        .market-delta {
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .delta-pos { color: #4CAF50; }
+        .delta-neg { color: #FF4B4B; }
+
+        /* --- MOBILE TABLE FIX --- */
+        /* Force Streamlit columns to stay side-by-side on mobile */
+        @media (max-width: 640px) {
+            div[data-testid="column"] {
+                width: auto !important;
+                flex: 1 1 auto !important;
+                min-width: 0px !important;
+            }
+            /* Hide the gap container that Streamlit sometimes adds */
+            div[data-testid="column"] > div {
+                width: 100% !important;
+            }
         }
 
         /* --- BUTTONS --- */
@@ -331,12 +324,24 @@ def apply_custom_ui():
             line-height: 28px !important;
             margin: 0px !important;
         }
-
-        /* Hide Streamlit element spacing */
-        div[data-testid="column"] > div > div > div {
-            gap: 0.2rem !important;
+        
+        /* Headers styling */
+        .tbl-header {
+            font-size: 0.75rem;
+            color: #aaa;
+            font-weight: bold;
+            text-transform: uppercase;
         }
         
+        /* Text styling */
+        .compact-text {
+            font-size: 0.85rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-top: 4px;
+        }
+
         /* High Contrast Inputs */
         div[data-baseweb="input"] > div, 
         div[data-baseweb="select"] > div {
@@ -346,6 +351,10 @@ def apply_custom_ui():
         }
         input { color: #ffffff !important; }
         
+        /* Tabs */
+        button[data-baseweb="tab"] { color: white !important; font-weight: bold; }
+        button[data-baseweb="tab"][aria-selected="true"] { color: #FFC107 !important; border-bottom-color: #FFC107 !important; }
+
     </style>
     """, unsafe_allow_html=True)
 
@@ -376,25 +385,44 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- DASHBOARD (FIXED CONTRAST & NAN) ---
+    # --- DASHBOARD (CUSTOM HTML FOR 2x2 GRID) ---
     with st.container():
         st.markdown("### 🌍 Market")
-        m_cols = st.columns(4)
+        
+        # 1. Fetch Data
         market_data = get_market_status()
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
-        for i, (label, key) in enumerate(metrics):
+        
+        # 2. Build HTML Grid
+        html_content = '<div class="market-grid">'
+        
+        for label, key in metrics:
             val, delta = market_data[key]
             
-            # Strict formatting to avoid 'nan'
+            # Formatting
             if val == 0.0:
                 display_val = "0.00"
                 display_delta = "0.00%"
+                delta_class = "delta-pos"
             else:
                 display_val = f"{val:,.2f}" if key == "VIX" else f"{val:,.0f}"
                 display_delta = f"{delta:.2f}%"
-            
-            with m_cols[i]:
-                st.metric(label=label, value=display_val, delta=display_delta)
+                delta_class = "delta-pos" if delta >= 0 else "delta-neg"
+                if key == "VIX": delta_class = "delta-neg" if delta >= 0 else "delta-pos" # VIX logic
+
+            # Create Card HTML
+            html_content += f"""
+            <div class="market-card">
+                <div class="market-title">{label}</div>
+                <div class="market-value">{display_val}</div>
+                <div class="market-delta {delta_class}">{display_delta}</div>
+            </div>
+            """
+        
+        html_content += '</div>'
+        
+        # 3. Render HTML
+        st.markdown(html_content, unsafe_allow_html=True)
         st.markdown("---")
 
     # --- SETTINGS ---
@@ -425,11 +453,11 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW (OPTIMIZED FOR MOBILE SINGLE LINE) ---
+                # --- TABLE VIEW (FORCED SINGLE LINE MOBILE) ---
                 if view_mode == "📄 Table":
                     # Headers: Ticker | Target | Current | Actions
-                    # Ratios: 1.2 | 1.2 | 1.2 | 1.0 -> Must be tight
-                    h1, h2, h3, h4 = st.columns([1.2, 1.2, 1.2, 1]) 
+                    # CSS @media forces these to stay in one row
+                    h1, h2, h3, h4 = st.columns([1.2, 1.2, 1.2, 1.0]) 
                     h1.markdown("<span class='tbl-header'>SYM</span>", unsafe_allow_html=True)
                     h2.markdown("<span class='tbl-header'>TGT</span>", unsafe_allow_html=True)
                     h3.markdown("<span class='tbl-header'>CUR</span>", unsafe_allow_html=True)
@@ -437,14 +465,15 @@ def main():
                     st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
+                        # The CSS will prevent these from stacking
+                        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.0])
                         
-                        # Data Columns (using HTML for font control)
+                        # Data
                         with c1: st.markdown(f"<div class='compact-text' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
                         with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
                         with c3: st.markdown(f"<div class='compact-text' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
                         
-                        # Action Column (Nested columns for buttons side-by-side)
+                        # Buttons (Tiny & Side-by-Side)
                         with c4:
                             b_edit, b_del = st.columns([1, 1], gap="small")
                             with b_edit:
