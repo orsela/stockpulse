@@ -12,7 +12,6 @@ import math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import numpy as np 
-import textwrap # קריטי לתיקון תצוגת ה-HTML
 
 # ==========================================
 # 0. CONFIGURATION & SECRETS
@@ -271,13 +270,13 @@ def apply_custom_ui():
             text-align: center;
         }
         .dashboard-title {
-            color: #dcdcdc; /* Light Grey/Silver */
+            color: #dcdcdc; 
             font-size: 0.8rem;
             font-weight: bold;
             text-transform: uppercase;
         }
         .dashboard-value {
-            color: #ffffff; /* Pure White */
+            color: #ffffff; 
             font-size: 1.5rem;
             font-weight: 800;
         }
@@ -286,19 +285,19 @@ def apply_custom_ui():
             font-weight: bold;
         }
 
-        /* --- MOBILE TABLE FIX (NO STACKING - FORCE ROW) --- */
+        /* --- MOBILE TABLE FIX (CRITICAL) --- */
         @media (max-width: 640px) {
-            /* Force Streamlit column container to stay horizontal */
+            /* 1. Force columns to stay in a row */
             div[data-testid="stHorizontalBlock"] {
                 flex-direction: row !important;
                 flex-wrap: nowrap !important;
                 gap: 2px !important;
             }
-            /* Allow columns to shrink infinitely to fit */
+            /* 2. Allow columns to be very narrow */
             div[data-testid="column"] {
-                flex: 1 1 auto !important;
-                min-width: 0px !important; 
-                width: auto !important;
+                flex: 1 !important;
+                min-width: 0 !important;
+                padding: 0 !important;
             }
         }
 
@@ -313,8 +312,16 @@ def apply_custom_ui():
             border: 1px solid #444 !important;
         }
         
-        .tbl-header { font-size: 0.7rem; color: #ccc; font-weight: bold; }
-        .compact-text { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 6px; font-family: monospace; }
+        .tbl-header { font-size: 0.7rem; color: #ccc; font-weight: bold; text-align: center; }
+        .compact-text { 
+            font-size: 0.8rem; 
+            white-space: nowrap; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            padding-top: 6px; 
+            font-family: monospace; 
+            text-align: center; 
+        }
         
         /* Input Fields */
         div[data-baseweb="input"] > div, 
@@ -358,15 +365,15 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- DASHBOARD (FIXED WITH TEXTWRAP) ---
+    # --- DASHBOARD (FIXED RENDERING) ---
     with st.container():
         st.markdown("### 🌍 Market")
         
         market_data = get_market_status()
         metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
         
-        # Using a list to build HTML avoids indentation pitfalls
-        cards = []
+        # Build cards list string explicitly
+        cards_html = ""
         for label, key in metrics:
             val, delta = market_data[key]
             
@@ -381,24 +388,22 @@ def main():
                 if delta < 0: color_delta = "#FF4B4B" # Red
                 if key == "VIX": color_delta = "#FF4B4B" if delta >= 0 else "#4CAF50"
 
-            card_html = f"""
+            cards_html += f"""
             <div class="dashboard-card">
                 <div class="dashboard-title">{label}</div>
                 <div class="dashboard-value">{display_val}</div>
                 <div style="color: {color_delta};" class="dashboard-delta">{display_delta}</div>
             </div>
             """
-            cards.append(card_html)
         
-        # Combine into the Grid Container
+        # Clean Final HTML Structure
         final_html = f"""
         <div class="dashboard-container">
-            {''.join(cards)}
+            {cards_html}
         </div>
         """
         
-        # textwrap.dedent cleans up any accidental leading spaces
-        st.markdown(textwrap.dedent(final_html), unsafe_allow_html=True)
+        st.markdown(final_html, unsafe_allow_html=True)
         st.markdown("---")
 
     # --- SETTINGS ---
@@ -429,11 +434,10 @@ def main():
             view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW ---
+                # --- TABLE VIEW (OPTIMIZED FOR MOBILE) ---
                 if view_mode == "📄 Table":
-                    # Headers
-                    # Ratio: 1.2 | 1.2 | 1.2 | 1.0 (Actions smaller)
-                    h1, h2, h3, h4 = st.columns([1.2, 1.2, 1.2, 1.0]) 
+                    # Headers - Adjusted Ratios for tight fit
+                    h1, h2, h3, h4 = st.columns([1.3, 1.2, 1.2, 1.0]) 
                     h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
                     h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
                     h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
@@ -441,8 +445,8 @@ def main():
                     st.markdown("<hr style='margin: 4px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        # Rows
-                        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.0])
+                        # Rows - Using same tight ratios
+                        c1, c2, c3, c4 = st.columns([1.3, 1.2, 1.2, 1.0])
                         
                         with c1: st.markdown(f"<div class='compact-text' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
                         with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
