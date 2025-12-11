@@ -236,7 +236,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (UPDATED WITH FIX)
+# 5. UI & CSS (FIXED HORIZONTAL & COMPACT)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -247,7 +247,7 @@ def apply_custom_ui():
         .dashboard-container {
             display: flex;
             flex-direction: column;
-            gap: 4px; /* Minimal gap between rows */
+            gap: 6px; /* Reduced gap */
             margin-bottom: 20px;
         }
 
@@ -269,13 +269,13 @@ def apply_custom_ui():
         
         /* New Font Styles for Horizontal Card */
         .market-title { 
-            font-size: 0.9rem; 
+            font-size: 0.95rem; 
             color: #fff; 
             font-weight: bold;
             flex: 1;
         }
         .market-value { 
-            font-size: 0.9rem; 
+            font-size: 0.95rem; 
             color: #ccc; 
             font-family: monospace;
             margin: 0 10px;
@@ -283,8 +283,9 @@ def apply_custom_ui():
         .market-delta { 
             font-size: 0.9rem; 
             font-weight: bold;
-            min-width: 60px;
+            min-width: 65px;
             text-align: right;
+            direction: ltr;
         }
 
         /* --- TABLE FIXES (ZERO TOLERANCE - Preserved) --- */
@@ -355,12 +356,12 @@ def main():
     with c1: st.markdown("<h3 style='margin:0; color:#FFC107;'>StockPulse</h3>", unsafe_allow_html=True)
     with c2: st.markdown(f"<div style='text-align:right;color:#888;padding-top:8px;'>{datetime.now():%H:%M}</div>", unsafe_allow_html=True)
 
-    # --- DASHBOARD (UPDATED: FIXED HTML + CSS) ---
+    # --- DASHBOARD (CORRECT HTML GENERATION) ---
     market_data = get_market_status()
     metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
     
-    # We build a flex container string
-    cards_html = '<div class="dashboard-container">'
+    # We build the HTML string cleanly to avoid indentation issues
+    html_out = '<div class="dashboard-container">'
     
     for label, key in metrics:
         v, d = market_data[key]
@@ -376,19 +377,14 @@ def main():
             
         col = "#00E676" if is_up else "#FF4B4B"
         
-        # New Horizontal Card HTML Structure
-        cards_html += f"""
-        <div class="market-card" style="border-left: 4px solid {col};">
-            <div class="market-title">{label}</div>
-            <div class="market-value">{vs}</div>
-            <div class="market-delta" style="color:{col}">{ds}</div>
-        </div>
-        """
+        # NOTE: This HTML is single-line formatted to prevent Markdown code-block interpretation
+        row_html = f'<div class="market-card" style="border-left: 4px solid {col};"><div class="market-title">{label}</div><div class="market-value">{vs}</div><div class="market-delta" style="color:{col}">{ds}</div></div>'
+        html_out += row_html
     
-    cards_html += '</div>'
+    html_out += '</div>'
     
     # Render with HTML enabled
-    st.markdown(cards_html, unsafe_allow_html=True)
+    st.markdown(html_out, unsafe_allow_html=True)
 
     # --- SETTINGS ---
     with st.expander("⚙️ Connection", expanded=False):
