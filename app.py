@@ -236,7 +236,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FINAL - MATCHING VISUAL DESIGN)
+# 5. UI & CSS (FINAL - PORTRAIT MODE OPTIMIZED)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -246,7 +246,7 @@ def apply_custom_ui():
         /* --- 1. DASHBOARD GRID (LOCKED) --- */
         .dashboard-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr; /* Mobile: 2 */
+            grid-template-columns: 1fr 1fr;
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -272,45 +272,45 @@ def apply_custom_ui():
         }
         label { color: #cccccc !important; font-weight: 500 !important; }
 
-        /* --- 3. TABLE STYLE (MATCHING VISUAL) --- */
+        /* --- 3. MOBILE TABLE OPTIMIZATIONS (NEW) --- */
         
-        /* Remove Gaps */
+        /* Eliminate Padding/Margins for Columns to fit mobile */
         div[data-testid="column"] { padding: 0px !important; }
         div[data-testid="stHorizontalBlock"] { gap: 0px !important; }
+        .block-container { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
         
-        /* Table Header - Centered */
+        /* Table Headers */
         .tbl-header { 
-            font-size: 0.7rem; color: #888; font-weight: bold; text-transform: uppercase; 
-            text-align: center; /* CENTERED */
-            margin-bottom: 4px;
+            font-size: 0.75rem; color: #888; font-weight: bold; text-transform: uppercase; 
+            text-align: center; margin-bottom: 4px;
         }
         
-        /* Table Cell - Centered */
+        /* Table Cells */
         .tbl-cell { 
             font-family: 'Roboto Mono', monospace; font-size: 0.8rem; color: #fff; 
-            padding: 10px 4px; /* Adjusted padding */
-            text-align: center; /* CENTERED */
+            padding: 8px 2px; /* Very tight padding */
+            text-align: center;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            display: flex; align-items: center; justify-content: center; height: 100%;
         }
         
-        .tbl-cell-dim { color: #aaa; }
-        
-        /* Minimal Action Buttons */
+        /* Action Buttons - Square & Compact */
         div.stButton > button {
             padding: 0px !important; margin: 0px !important;
-            font-size: 1.1rem !important; line-height: 1 !important;
-            height: 34px !important; width: 34px !important;
-            border: none !important; background: transparent !important;
-            color: #666 !important; display: flex; justify-content: center; align-items: center;
+            font-size: 1rem !important; /* Icon size */
+            line-height: 1 !important;
+            height: 32px !important; width: 100% !important; /* Fill column */
+            border: 1px solid #333 !important; background: #222 !important;
+            color: #ccc !important; 
+            border-radius: 6px !important;
         }
-        div.stButton > button:hover { color: #fff !important; background: #333 !important; border-radius: 4px; }
+        div.stButton > button:hover { 
+            background: #333 !important; color: #fff !important; border-color: #666 !important;
+        }
         
-        /* Table Row Container with Border */
-        .table-row {
-            border: 1px solid; /* Color set inline */
-            border-radius: 6px;
-            margin-bottom: 4px;
-            background: #1a1a1a;
+        /* Table Row Styling */
+        .table-row-sep {
+             height: 1px; background-color: #222; margin: 2px 0;
         }
 
     </style>
@@ -336,7 +336,7 @@ def main():
     with c1: st.markdown("<h3 style='margin:0; color:#FFC107;'>StockPulse</h3>", unsafe_allow_html=True)
     with c2: st.markdown(f"<div style='text-align:right;color:#888;padding-top:8px;'>{datetime.now():%H:%M}</div>", unsafe_allow_html=True)
 
-    # DASHBOARD (LOCKED)
+    # DASHBOARD
     market_data = get_market_status()
     metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
     html_out = '<div class="dashboard-grid">'
@@ -369,7 +369,7 @@ def main():
     # TABS
     tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active", "🛡️ Calc", "📂 Log"])
     
-    # 1. ALERTS TAB (MATCHING VISUAL)
+    # 1. ALERTS TAB
     with tab_alerts:
         col_list, col_add = st.columns([2, 1])
         active_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
@@ -379,35 +379,40 @@ def main():
             
             if not active_view.empty:
                 if view_mode == "Table":
+                    # MOBILE OPTIMIZED TABLE
                     with st.container():
-                        # RATIOS for centered look
-                        ratios = [1.2, 1.2, 1.2, 1.2] 
+                        # Ratios optimized for Portrait: Ticker(1.3), Tgt(1.2), Cur(1.2), Act(1.6)
+                        # The ACT column needs space for 2 side-by-side buttons
+                        ratios = [1.3, 1.2, 1.2, 1.6]
                         
-                        # HEADER
+                        # Header
                         h1, h2, h3, h4 = st.columns(ratios)
                         h1.markdown("<div class='tbl-header'>Ticker</div>", unsafe_allow_html=True)
                         h2.markdown("<div class='tbl-header'>Tgt</div>", unsafe_allow_html=True)
                         h3.markdown("<div class='tbl-header'>Cur</div>", unsafe_allow_html=True)
                         h4.markdown("<div class='tbl-header'>ACT</div>", unsafe_allow_html=True)
-                        st.markdown("<div style='margin-bottom:5px;'></div>", unsafe_allow_html=True)
+                        
+                        # Divider
+                        st.markdown("<div style='height:1px; background:#444; margin-bottom:6px;'></div>", unsafe_allow_html=True)
 
-                        # ROWS
+                        # Rows
                         for idx, row in active_view.iterrows():
                             curr = float(row['current_price'] or 0)
                             tgt = float(row['target_price'])
-                            # Border color logic: Red if current > target, else Green
-                            border_col = "#FF4B4B" if curr > tgt else "#00E676"
-
-                            # Wrap row in bordered container
-                            st.markdown(f'<div class="table-row" style="border-color: {border_col};">', unsafe_allow_html=True)
                             
+                            # Color logic: Red if Curr > Tgt, else Green
+                            row_color = "#FF4B4B" if curr > tgt else "#00E676"
+                            
+                            # Row Columns
                             c1, c2, c3, c4 = st.columns(ratios)
+                            
+                            # Data Cells
                             c1.markdown(f"<div class='tbl-cell' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
                             c2.markdown(f"<div class='tbl-cell'>{tgt:.1f}</div>", unsafe_allow_html=True)
-                            c3.markdown(f"<div class='tbl-cell tbl-cell-dim'>{curr:.1f}</div>", unsafe_allow_html=True)
+                            c3.markdown(f"<div class='tbl-cell' style='color:#aaa;'>{curr:.1f}</div>", unsafe_allow_html=True)
                             
+                            # Action Buttons (Side by Side)
                             with c4:
-                                # Centered Action Buttons
                                 b1, b2 = st.columns(2)
                                 with b1:
                                     if st.button("✏️", key=f"ed_{idx}"):
@@ -416,13 +421,15 @@ def main():
                                         st.session_state.edit_note = row['notes']
                                         st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
                                 with b2:
-                                    if st.button("✕", key=f"del_{idx}"):
+                                    # TRASH CAN ICON
+                                    if st.button("🗑️", key=f"del_{idx}"):
                                         st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
                             
-                            st.markdown('</div>', unsafe_allow_html=True) # Close row container
+                            # Colored Separator to simulate border
+                            st.markdown(f"<div style='height:1px; background:{row_color}; margin: 4px 0; opacity: 0.6;'></div>", unsafe_allow_html=True)
 
                 else: 
-                    # CARD VIEW (unchanged)
+                    # Card View
                     for idx, row in active_view.iterrows():
                         curr = float(row['current_price'] or 0); tgt = float(row['target_price'])
                         diff = (curr - tgt) / tgt * 100 if tgt else 0
