@@ -321,46 +321,50 @@ def main():
             if active.empty:
                 st.info("No active alerts")
             else:
-                if view == "Table":
-                    for idx, row in active.iterrows():
-                        curr = float(row['current_price'] or 0)
-                        tgt = float(row['target_price'])
-                        diff = (curr - tgt)/tgt*100 if tgt else 0
-                        bar_color = "#00E676" if row['direction']=="Up" else "#FF4B4B"
-                        st.markdown(f"""
-                        <div class="alert-row" style="border-left-color:{bar_color}">
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <div>
-                                    <span class="ticker-big">{row['ticker']}</span>
-                                    <span style="margin:0 10px; color:#888;">→</span>
-                                    <span class="target-big">${tgt:.2f}</span>
-                                </div>
-                                <div style="text-align:right;">
-                                    <div style="color:#aaa; font-size:0.9rem;">Now ${curr:.2f}</div>
-                                    <div style="color:{'#00E676' if diff>=0 else '#FF4B4B'}">{diff:+.2f}%</div>
-                                </div>
-                            </div>
-                            <div style="margin-top:8px; color:#aaa; font-size:0.9rem;">
-                                {row['direction']} • {row['notes'] or "No note"}
-                            </div>
-                            <div style="margin-top:12px; display:flex; gap:8px;">
-                                {st.button("Edit", key=f"e{idx}")}
-                                {st.button("Delete", key=f"d{idx}")}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                                if st.session_state.get(f"e{idx}"):
-                                    st.session_state.edit_ticker = row['ticker']
-                                    st.session_state.edit_price = tgt
-                                    st.session_state.edit_note = row['notes']
-                                    st.session_state.alert_db.drop(idx, inplace=True)
-                                    sync_db(st.session_state.alert_db)
-                                    st.rerun()
-                                if st.session_state.get(f"d{idx}"):
-                                    st.session_state.alert_db.drop(idx, inplace=True)
-                                    sync_db(st.session_state.alert_db)
-                                    st.rerun()
+                                  if view == "Table":
+                        for idx, row in active.iterrows():
+                            curr = float(row['current_price'] or 0)
+                            tgt = float(row['target_price'])
+                            diff = (curr - tgt) / tgt * 100 if tgt else 0
+                            bar_color = "#00E676" if row['direction'] == "Up" else "#FF4B4B"
 
+                            # כפתורים לפני ה-HTML – חייבים להיות כאן!
+                            col_edit, col_del = st.columns([1, 1])
+                            edit_clicked = col_edit.button("Edit", key=f"e{idx}")
+                            delete_clicked = col_del.button("Delete", key=f"d{idx}")
+
+                            st.markdown(f"""
+                            <div class="alert-row" style="border-left-color:{bar_color}">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <div>
+                                        <span class="ticker-big">{row['ticker']}</span>
+                                        <span style="margin:0 10px; color:#888;">→</span>
+                                        <span class="target-big">${tgt:.2f}</span>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <div style="color:#aaa; font-size:0.9rem;">Now ${curr:.2f}</div>
+                                        <div style="color:{'#00E676' if diff>=0 else '#FF4B4B'}">{diff:+.2f}%</div>
+                                    </div>
+                                </div>
+                                <div style="margin-top:8px; color:#aaa; font-size:0.9rem;">
+                                    {row['direction']} • {row['notes'] or "No note"}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            # טיפול בלחיצות – רק אחרי שהכפתורים נוצרו!
+                            if edit_clicked:
+                                st.session_state.edit_ticker = row['ticker']
+                                st.session_state.edit_price = tgt
+                                st.session_state.edit_note = row['notes']
+                                st.session_state.alert_db.drop(idx, inplace=True)
+                                sync_db(st.session_state.alert_db)
+                                st.rerun()
+
+                            if delete_clicked:
+                                st.session_state.alert_db.drop(idx, inplace=True)
+                                sync_db(st.session_state.alert_db)
+                                st.rerun()
         with col_add:
             st.markdown("### Add Alert")
             with st.form("add_form"):
