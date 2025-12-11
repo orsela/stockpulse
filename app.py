@@ -107,6 +107,7 @@ def get_market_status():
             else:
                 delta = 0.0
 
+            # NAN FIX: Ensure valid numbers
             if pd.isna(price) or np.isnan(price): price = 0.0
             if pd.isna(delta) or np.isnan(delta): delta = 0.0
 
@@ -251,13 +252,14 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS
+# 5. UI & CSS (OPTIMIZED)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
         
+        /* Inputs & Selects */
         div[data-baseweb="input"] > div, 
         div[data-baseweb="select"] > div, 
         div[data-testid="stNumberInput"] div[data-baseweb="input"] > div {
@@ -269,55 +271,56 @@ def apply_custom_ui():
         div[data-baseweb="select"] span { color: #ffffff !important; }
         label { color: #ffc107 !important; font-weight: bold !important; }
 
+        /* Dashboard Metrics */
         div[data-testid="metric-container"] {
             background-color: #1c1c1e;
             border: 1px solid #333;
             border-radius: 8px;
-            padding: 15px;
+            padding: 10px; /* Reduced padding */
             color: #ffffff;
         }
         div[data-testid="metric-container"] > div:nth-child(2) {
             color: #FFC107 !important;
             font-weight: bold;
         }
-        
-        .sticky-note { 
-            background: #F9E79F; 
-            color: #000 !important; 
-            padding: 10px; 
-            border-radius: 8px; 
-            margin-bottom: 5px; 
-            box-shadow: 2px 2px 10px rgba(0,0,0,0.5); 
-        }
-        .sticky-note b, .sticky-note span, .sticky-note small { color: #000000 !important; }
 
-        /* Table Styling */
-        .table-row {
-            background-color: #262730;
-            padding: 10px;
-            border-radius: 5px;
-            border-left: 3px solid #FFC107;
-            margin-bottom: 5px;
+        /* TABS VISIBILITY - FIXED */
+        button[data-baseweb="tab"] {
+            color: #ffffff !important; /* Force white text */
+            font-weight: bold !important;
+            font-size: 1rem !important;
+        }
+        button[data-baseweb="tab"][aria-selected="true"] {
+            color: #FFC107 !important; /* Gold when active */
+            border-bottom-color: #FFC107 !important;
         }
 
+        /* Buttons General */
         button[kind="primary"] { background-color: #FF4B4B !important; color: white !important; border: none; }
         
-        /* Compact Buttons for Table/Card Actions */
-        button[kind="secondary"].action-btn {
-            background-color: #333 !important;
-            color: #fff !important;
-            border: 1px solid #555 !important;
-            padding: 2px 8px !important;
+        /* COMPACT TABLE ACTIONS - SMALLER BUTTONS */
+        div.stButton > button {
+            width: auto !important;
+            padding: 0.25rem 0.5rem !important; /* Very small padding */
+            font-size: 0.8rem !important;
             min-height: 0px !important;
-            height: 35px !important;
+            height: auto !important;
+            line-height: 1 !important;
+            margin-top: 0px !important;
         }
-        button[kind="secondary"].delete-btn {
-            background-color: #333 !important;
-            color: #FF4B4B !important;
-            border: 1px solid #555 !important;
-            padding: 2px 8px !important;
-            min-height: 0px !important;
-            height: 35px !important;
+        
+        /* Remove spacing between columns in table */
+        div[data-testid="column"] {
+            padding: 0 !important;
+        }
+        
+        /* Force Single Line on Mobile */
+        .compact-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 0.9rem;
+            margin-top: 5px;
         }
 
     </style>
@@ -338,10 +341,10 @@ def main():
     if 'edit_price' not in st.session_state: st.session_state.edit_price = 0.0
     if 'edit_note' not in st.session_state: st.session_state.edit_note = ""
 
-    # --- HEADER WITH TIMESTAMP ---
+    # --- HEADER ---
     c_title, c_time = st.columns([3, 1])
     with c_title:
-        st.markdown("<h1 style='text-align: left; margin:0; color: #FFC107;'>⚡ StockPulse Terminal</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: left; margin:0; color: #FFC107;'>⚡ StockPulse</h1>", unsafe_allow_html=True)
     with c_time:
         current_time = datetime.now().strftime("%d/%m %H:%M")
         st.markdown(f"""
@@ -350,29 +353,29 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 4. MARKET DASHBOARD ---
+    # --- MARKET DASHBOARD ---
     with st.container():
-        st.markdown("### 🌍 Market Status")
+        st.markdown("### 🌍 Market")
         m_cols = st.columns(4)
         market_data = get_market_status()
-        metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
+        metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("BTC", "Bitcoin")]
         for i, (label, key) in enumerate(metrics):
             val, delta = market_data[key]
-            display_val = f"{val:,.2f}" if val != 0 else "N/A"
-            display_delta = f"{delta:.2f}%" if val != 0 else "0.00%"
+            display_val = f"{val:,.0f}" if val != 0 else "N/A" # Removed decimals for compactness
+            display_delta = f"{delta:.1f}%" if val != 0 else "0.0%"
             with m_cols[i]:
                 st.metric(label=label, value=display_val, delta=display_delta)
         st.markdown("---")
 
     # --- SETTINGS ---
-    with st.expander("⚙️ Settings & Connection", expanded=False):
+    with st.expander("⚙️ Connection", expanded=False):
         c1, c2 = st.columns(2)
         with c1: st.text_input("Email", key="temp_email", value=st.session_state.user_email)
         with c2: st.text_input("WhatsApp", key="temp_phone", value=st.session_state.user_phone)
-        if st.button("Save Connection Settings", type="primary"):
+        if st.button("Save Settings", type="primary"):
             st.session_state.user_email = st.session_state.temp_email
             st.session_state.user_phone = st.session_state.temp_phone
-            st.success("✅ Settings Saved Successfully!")
+            st.success("Saved!")
         
         auto_poll = st.toggle("🔄 Auto-Poll (60s)", value=False)
         if auto_poll:
@@ -381,7 +384,7 @@ def main():
             st.rerun()
 
     # --- TABS ---
-    tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active Alerts", "🛡️ Smart SL Calculator", "📂 History Log"])
+    tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active", "🛡️ Calc", "📂 Log"])
     
     # 1. ALERTS TAB
     with tab_alerts:
@@ -389,30 +392,32 @@ def main():
         active_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
         
         with col_list:
-            # VIEW MODE TOGGLE
-            view_mode = st.radio("Display View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
+            view_mode = st.radio("View:", ["📄 Table", "🗂️ Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW LOGIC ---
+                # --- TABLE VIEW (OPTIMIZED FOR MOBILE) ---
                 if view_mode == "📄 Table":
-                    # Table Header
-                    h1, h2, h3, h4 = st.columns([1.5, 1.5, 1.5, 1.5])
-                    h1.markdown("**Ticker**")
-                    h2.markdown("**Target**")
-                    h3.markdown("**Current**")
-                    h4.markdown("**Actions**")
-                    st.markdown("<hr style='margin: 5px 0; border-color: #444;'>", unsafe_allow_html=True)
+                    # Reduced columns to just fit info
+                    h1, h2, h3, h4 = st.columns([1.5, 2, 1.5, 1.5]) 
+                    h1.markdown("**Sym**")
+                    h2.markdown("**Tgt**")
+                    h3.markdown("**Cur**")
+                    h4.markdown("**Act**")
+                    st.markdown("<hr style='margin: 2px 0; border-color: #444;'>", unsafe_allow_html=True)
                     
                     for idx, row in active_view.iterrows():
-                        c1, c2, c3, c4 = st.columns([1.5, 1.5, 1.5, 1.5])
-                        with c1: st.markdown(f"**{row['ticker']}**")
-                        with c2: st.markdown(f"${float(row['target_price']):.2f} ({row['direction']})")
-                        with c3: st.markdown(f"${float(row['current_price']):.2f}")
+                        # Tight columns
+                        c1, c2, c3, c4 = st.columns([1.5, 2, 1.5, 1.5])
+                        
+                        # Use HTML for nowrap text
+                        with c1: st.markdown(f"<div class='compact-text'><b>{row['ticker']}</b></div>", unsafe_allow_html=True)
+                        with c2: st.markdown(f"<div class='compact-text'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
+                        with c3: st.markdown(f"<div class='compact-text'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
                         with c4:
-                            # Attached Buttons
-                            b_edit, b_del = st.columns([1, 1])
+                            # Side by side mini buttons
+                            b_edit, b_del = st.columns([1, 1], gap="small")
                             with b_edit:
-                                if st.button("✏️", key=f"tbl_ed_{idx}", help="Edit"):
+                                if st.button("✏️", key=f"te_{idx}"):
                                     st.session_state.edit_ticker = row['ticker']
                                     st.session_state.edit_price = float(row['target_price'])
                                     st.session_state.edit_note = row['notes']
@@ -421,31 +426,28 @@ def main():
                                     sync_db(st.session_state.alert_db)
                                     st.rerun()
                             with b_del:
-                                if st.button("🗑️", key=f"tbl_del_{idx}", help="Delete"):
+                                if st.button("🗑️", key=f"td_{idx}"):
                                     st.session_state.alert_db.drop(idx, inplace=True)
                                     st.session_state.alert_db.reset_index(drop=True, inplace=True)
                                     sync_db(st.session_state.alert_db)
                                     st.rerun()
-                        st.markdown("<hr style='margin: 5px 0; border-color: #333;'>", unsafe_allow_html=True)
+                        st.markdown("<hr style='margin: 2px 0; border-color: #333;'>", unsafe_allow_html=True)
 
-                # --- CARD VIEW LOGIC ---
+                # --- CARD VIEW ---
                 else:
                     for idx, row in active_view.iterrows():
                         st.markdown(f"""
-                        <div class="sticky-note">
+                        <div style="background:#F9E79F; padding:10px; border-radius:8px; margin-bottom:5px; color:black;">
                             <div style="display:flex; justify-content:space-between;">
-                                <span style="font-size:1.1em; font-weight:bold;">{row['ticker']}</span> 
-                                <span style="font-weight:bold;">Target: ${float(row['target_price']):.2f}</span>
+                                <b>{row['ticker']}</b> 
+                                <b>${float(row['target_price']):.2f}</b>
                             </div>
-                            <div style="font-size:0.9em; margin-top:5px;">
-                                 Curr: ${float(row['current_price']):.2f} | {row['direction']} | {row['notes']}
-                            </div>
+                            <small>{row['direction']} | {row['notes']}</small>
                         </div>""", unsafe_allow_html=True)
                         
-                        # Attached Buttons below card
-                        bc1, bc2, bc3 = st.columns([1, 1, 6])
+                        bc1, bc2, bc3 = st.columns([1, 1, 4])
                         with bc1:
-                            if st.button("✏️", key=f"crd_ed_{idx}"):
+                            if st.button("✏️", key=f"ce_{idx}"):
                                 st.session_state.edit_ticker = row['ticker']
                                 st.session_state.edit_price = float(row['target_price'])
                                 st.session_state.edit_note = row['notes']
@@ -454,7 +456,7 @@ def main():
                                 sync_db(st.session_state.alert_db)
                                 st.rerun()
                         with bc2:
-                            if st.button("🗑️", key=f"crd_del_{idx}"):
+                            if st.button("🗑️", key=f"cd_{idx}"):
                                 st.session_state.alert_db.drop(idx, inplace=True)
                                 st.session_state.alert_db.reset_index(drop=True, inplace=True)
                                 sync_db(st.session_state.alert_db)
@@ -495,7 +497,7 @@ def main():
     with tab_calc:
         st.markdown("### 🧠 AI Stop-Loss")
         
-        calc_ticker = st.text_input("Stock Ticker", placeholder="Enter Ticker...").upper()
+        calc_ticker = st.text_input("Stock Ticker", placeholder="Ticker...").upper()
         
         current_val = 0.0
         if calc_ticker:
@@ -508,11 +510,11 @@ def main():
         max_rng = current_val * 2 if current_val > 0 else 1000.0
         val_default = current_val if current_val > 0 else 0.0
         
-        buy_price = st.slider("Purchase Price ($)", min_value=0.0, max_value=max_rng, value=val_default, step=0.1)
+        buy_price = st.slider("Buy Price ($)", min_value=0.0, max_value=max_rng, value=val_default, step=0.1)
         
-        if st.button("Calculate Safe Stop", type="primary"):
+        if st.button("Calculate", type="primary"):
             if calc_ticker:
-                with st.spinner("Analyzing market structure..."):
+                with st.spinner("Analyzing..."):
                     res, err = calculate_smart_sl(calc_ticker, buy_price)
                     if err: st.error(err)
                     else:
@@ -524,45 +526,45 @@ def main():
             tkr = st.session_state.calc_ticker
             
             st.markdown(f"""
-            <div style="background:#262730; padding:20px; border-radius:10px; border-left:5px solid #FFC107;">
-                <h3 style="margin-top:0;">Analysis: {tkr}</h3>
-                <div style="font-size:1.5rem; font-weight:bold; color:#FFC107;">Recommended SL: ${res['sl_price']:,.2f}</div>
-                <div>Logic: {res['reason']}</div>
-                <div>Trend: {res['trend']} | MA150: ${res['ma150']:.2f}</div>
+            <div style="background:#262730; padding:15px; border-radius:10px; border-left:5px solid #FFC107;">
+                <h3 style="margin-top:0;">{tkr} Analysis</h3>
+                <div style="font-size:1.5rem; font-weight:bold; color:#FFC107;">SL: ${res['sl_price']:,.2f}</div>
+                <div>Reason: {res['reason']}</div>
+                <div>Trend: {res['trend']}</div>
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button(f"🔔 Set Stop Loss Alert"):
+            if st.button(f"🔔 Set Alert"):
                 sl_target = round(res['sl_price'], 2)
                 if is_duplicate_alert(tkr, sl_target, "Down"):
-                     st.warning("Stop Loss alert already active!")
+                     st.warning("Active!")
                 else:
                     new = {
                         "ticker": tkr, "target_price": sl_target, "current_price": res['current_price'],
-                        "direction": "Down", "notes": f"Smart SL ({res['reason']})",
+                        "direction": "Down", "notes": f"Smart SL",
                         "created_at": str(datetime.now()), "status": "Active", "triggered_at": ""
                     }
                     st.session_state.alert_db = pd.concat([st.session_state.alert_db, pd.DataFrame([new])], ignore_index=True)
                     sync_db(st.session_state.alert_db)
-                    st.success(f"Protection Set for {tkr}!")
+                    st.success("Set!")
                     time.sleep(1)
                     st.rerun()
 
     # 3. HISTORY TAB
     with tab_hist:
-        st.markdown("### 📜 Alert History Log")
+        st.markdown("### 📜 Log")
         hist_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Completed']
         
         if not hist_view.empty:
             for idx, row in hist_view[::-1].iterrows():
-                st.info(f"✅ {row['ticker']} - Target ${float(row['target_price']):.2f} reached on {row['triggered_at']}. Note: {row['notes']}")
+                st.info(f"✅ {row['ticker']} - ${float(row['target_price']):.2f} on {row['triggered_at']}")
             
-            if st.button("🗑️ Clear History (Keep Active)"):
+            if st.button("🗑️ Clear Log"):
                 st.session_state.alert_db = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
                 sync_db(st.session_state.alert_db)
                 st.rerun()
         else:
-            st.caption("No completed alerts yet.")
+            st.caption("Empty.")
 
 if __name__ == "__main__":
     main()
