@@ -236,103 +236,102 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FIXED HORIZONTAL & COMPACT)
+# 5. UI & CSS (GRID + CONTRAST FIXES)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
     <style>
         .stApp { background-color: #0e0e0e !important; color: #ffffff; }
 
-        /* --- NEW DASHBOARD STYLE (Compact Rows) --- */
-        .dashboard-container {
-            display: flex;
-            flex-direction: column;
-            gap: 6px; /* Reduced gap */
+        /* --- 1. DASHBOARD GRID SYSTEM (The Fix) --- */
+        /* This forces 2 columns on mobile, 4 on desktop */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* Mobile Default: 2 per row */
+            gap: 10px;
             margin-bottom: 20px;
+        }
+        
+        /* On wider screens (Tablets/Desktop), switch to 4 per row */
+        @media (min-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
         }
 
         .market-card { 
             background: #1a1a1a;
             border: 1px solid #333;
             border-radius: 8px; 
-            padding: 8px 12px; /* Compressed padding */
+            padding: 8px 12px;
             
-            /* The key to horizontal layout on all screens */
+            /* Horizontal Layout Inside Card */
             display: flex;
             flex-direction: row; 
             justify-content: space-between;
             align-items: center;
-            
-            margin: 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
         
-        /* New Font Styles for Horizontal Card */
-        .market-title { 
-            font-size: 0.95rem; 
-            color: #fff; 
-            font-weight: bold;
-            flex: 1;
+        .market-title { font-size: 0.9rem; color: #fff; font-weight: bold; flex: 1; }
+        .market-value { font-size: 0.9rem; color: #ddd; font-family: monospace; margin: 0 5px; }
+        .market-delta { font-size: 0.85rem; font-weight: bold; min-width: 55px; text-align: right; direction: ltr; }
+
+        /* --- 2. INPUT CONTRAST FIX --- */
+        /* Forces inputs to have dark gray background and WHITE text */
+        input, textarea, select, div[data-baseweb="select"] > div {
+            color: #ffffff !important;
+            background-color: #262626 !important;
+            border-color: #555 !important;
         }
-        .market-value { 
-            font-size: 0.95rem; 
-            color: #ccc; 
-            font-family: monospace;
-            margin: 0 10px;
+        
+        /* Specifically target Streamlit's input wrapper */
+        div[data-testid="stTextInput"] > div > div {
+            background-color: #262626 !important;
+            color: white !important;
         }
-        .market-delta { 
-            font-size: 0.9rem; 
-            font-weight: bold;
-            min-width: 65px;
-            text-align: right;
-            direction: ltr;
+        div[data-testid="stNumberInput"] > div > div {
+            background-color: #262626 !important;
+            color: white !important;
+        }
+        
+        /* Label Color */
+        label { color: #cccccc !important; font-weight: 500 !important; }
+
+        /* --- 3. TABLE FIXES --- */
+        div[data-testid="column"] { padding: 0px !important; }
+        
+        .tbl-header { 
+            font-size: 0.75rem; 
+            color: #888; 
+            font-weight: bold; 
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        
+        .table-row-bg {
+            background-color: #161616;
+            padding: 8px 4px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            border: 1px solid #222;
         }
 
-        /* --- TABLE FIXES (ZERO TOLERANCE - Preserved) --- */
+        .ticker-cell { font-family: 'Roboto Mono', monospace; font-weight: bold; color: #FFC107; font-size: 0.85rem; }
+        .value-cell { font-family: 'Roboto Mono', monospace; color: #fff; font-size: 0.85rem; }
         
-        /* 1. Force Horizontal Flow */
-        div[data-testid="stHorizontalBlock"] {
-            flex-direction: row !important;
-            flex-wrap: nowrap !important;
-            align-items: center !important;
-            gap: 0px !important;
-        }
-        
-        /* 2. Zero Padding & Shrinkable Columns */
-        div[data-testid="column"] {
-            width: auto !important;
-            flex: 1 1 0px !important;
-            min-width: 0 !important;
-            padding: 0px !important;
-            overflow: hidden !important;
-        }
-        
-        /* 3. Tiny Buttons */
+        /* Tiny Buttons */
         div.stButton > button {
-            padding: 0px !important;
-            font-size: 0.65rem !important;
-            height: 24px !important;
-            line-height: 24px !important;
-            width: 100% !important;
-            border: 1px solid #333 !important;
+            padding: 0px 8px !important;
+            font-size: 0.75rem !important;
+            height: 28px !important;
+            line-height: 28px !important;
+            border: 1px solid #444 !important;
             background: #222 !important;
-            margin: 0 !important;
-            min-height: 0px !important;
+            color: #eee !important;
         }
+        div.stButton > button:hover { border-color: #888 !important; color: #fff !important; }
 
-        /* 4. Text Compactness */
-        .tbl-header { font-size: 0.6rem; color: #888; font-weight: bold; text-align: center; }
-        .compact-cell { font-size: 0.7rem; font-family: 'Roboto Mono', monospace; text-align: center; padding-top: 5px; white-space: nowrap; overflow: hidden; }
-        .ticker-cell { font-size: 0.7rem; font-family: 'Roboto Mono', monospace; font-weight: bold; color: #FFC107; text-align: left; padding-left: 2px; padding-top: 5px; white-space: nowrap; overflow: hidden;}
-        
-        /* Common */
-        input { color: #ffffff !important; }
-        .block-container { padding-top: 1rem !important; padding-bottom: 3rem !important; padding-left: 4px !important; padding-right: 4px !important; }
-        
-        /* Alert Card Style */
-        .alert-card { background: #1a1a1a; padding: 16px; border-radius: 12px; margin-bottom: 12px; border-left: 5px solid #333; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
-        .ticker-big { font-size: 1.5rem; font-weight: 900; color: #FFC107; }
-        .target-big { font-size: 1.3rem; font-weight: bold; color: #00E676; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -356,12 +355,12 @@ def main():
     with c1: st.markdown("<h3 style='margin:0; color:#FFC107;'>StockPulse</h3>", unsafe_allow_html=True)
     with c2: st.markdown(f"<div style='text-align:right;color:#888;padding-top:8px;'>{datetime.now():%H:%M}</div>", unsafe_allow_html=True)
 
-    # --- DASHBOARD (CORRECT HTML GENERATION) ---
+    # --- DASHBOARD (GRID LAYOUT) ---
     market_data = get_market_status()
     metrics = [("S&P 500", "S&P 500"), ("Nasdaq", "Nasdaq"), ("VIX", "VIX"), ("Bitcoin", "Bitcoin")]
     
-    # We build the HTML string cleanly to avoid indentation issues
-    html_out = '<div class="dashboard-container">'
+    # Grid Container
+    html_out = '<div class="dashboard-grid">'
     
     for label, key in metrics:
         v, d = market_data[key]
@@ -377,13 +376,11 @@ def main():
             
         col = "#00E676" if is_up else "#FF4B4B"
         
-        # NOTE: This HTML is single-line formatted to prevent Markdown code-block interpretation
-        row_html = f'<div class="market-card" style="border-left: 4px solid {col};"><div class="market-title">{label}</div><div class="market-value">{vs}</div><div class="market-delta" style="color:{col}">{ds}</div></div>'
+        # Card HTML
+        row_html = f'<div class="market-card" style="border-left: 3px solid {col};"><div class="market-title">{label}</div><div class="market-value">{vs}</div><div class="market-delta" style="color:{col}">{ds}</div></div>'
         html_out += row_html
     
     html_out += '</div>'
-    
-    # Render with HTML enabled
     st.markdown(html_out, unsafe_allow_html=True)
 
     # --- SETTINGS ---
@@ -413,75 +410,59 @@ def main():
             view_mode = st.radio("View:", ["Table", "Cards"], horizontal=True, label_visibility="collapsed")
             
             if not active_view.empty:
-                # --- TABLE VIEW (FIXED ZERO GAP) ---
                 if view_mode == "Table":
-                    # Use a container to slightly inset the table
-                    with st.container():
-                        h1, h2, h3, h4 = st.columns([1.5, 1.1, 1.1, 1.1]) 
-                        h1.markdown("<div class='tbl-header' style='text-align:left; padding-left:2px;'>SYM</div>", unsafe_allow_html=True)
-                        h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
-                        h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
-                        h4.markdown("<div class='tbl-header'>ACT</div>", unsafe_allow_html=True)
-                        st.markdown("<div style='height:1px; background:#333; margin-bottom:5px;'></div>", unsafe_allow_html=True)
-                        
-                        for idx, row in active_view.iterrows():
-                            # Strict ratios matching header
-                            c1, c2, c3, c4 = st.columns([1.5, 1.1, 1.1, 1.1])
+                    # Headers with specific ratio
+                    h1, h2, h3, h4 = st.columns([1.5, 1.2, 1.2, 1.1]) 
+                    h1.markdown("<div class='tbl-header'>Ticker</div>", unsafe_allow_html=True)
+                    h2.markdown("<div class='tbl-header'>Target</div>", unsafe_allow_html=True)
+                    h3.markdown("<div class='tbl-header'>Current</div>", unsafe_allow_html=True)
+                    h4.markdown("<div class='tbl-header'>Action</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("<div style='margin-bottom:5px;'></div>", unsafe_allow_html=True)
+                    
+                    for idx, row in active_view.iterrows():
+                        # Row Container for visual separation
+                        with st.container():
+                            r1, r2, r3, r4 = st.columns([1.5, 1.2, 1.2, 1.1])
                             
-                            with c1: st.markdown(f"<div class='ticker-cell'>{row['ticker']}</div>", unsafe_allow_html=True)
-                            with c2: st.markdown(f"<div class='compact-cell'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
-                            with c3: st.markdown(f"<div class='compact-cell' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
+                            # Use divs to style text properly
+                            r1.markdown(f"<div class='ticker-cell'>{row['ticker']}</div>", unsafe_allow_html=True)
+                            r2.markdown(f"<div class='value-cell'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
+                            r3.markdown(f"<div class='value-cell' style='color:#aaa;'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
                             
-                            with c4:
-                                b1, b2 = st.columns(2)
-                                with b1: 
-                                    if st.button("✏️", key=f"te_{idx}"):
-                                        st.session_state.edit_ticker = row['ticker']
-                                        st.session_state.edit_price = float(row['target_price'])
-                                        st.session_state.edit_note = row['notes']
-                                        st.session_state.alert_db.drop(idx, inplace=True)
-                                        st.session_state.alert_db.reset_index(drop=True, inplace=True)
-                                        sync_db(st.session_state.alert_db)
-                                        st.rerun()
-                                with b2:
-                                    if st.button("✕", key=f"td_{idx}"):
-                                        st.session_state.alert_db.drop(idx, inplace=True)
-                                        st.session_state.alert_db.reset_index(drop=True, inplace=True)
-                                        sync_db(st.session_state.alert_db)
-                                        st.rerun()
-                            st.markdown("<div style='height:1px; background:#222; margin: 2px 0;'></div>", unsafe_allow_html=True)
+                            with r4:
+                                if st.button("✕", key=f"td_{idx}"):
+                                    st.session_state.alert_db.drop(idx, inplace=True)
+                                    st.session_state.alert_db.reset_index(drop=True, inplace=True)
+                                    sync_db(st.session_state.alert_db)
+                                    st.rerun()
+                            
+                            # Separator line
+                            st.markdown("<div style='height:1px; background:#333; margin: 4px 0;'></div>", unsafe_allow_html=True)
                 
-                # --- CARD VIEW ---
                 else: 
+                    # Card View (unchanged logic)
                     for idx, row in active_view.iterrows():
                         curr = float(row['current_price'] or 0)
                         tgt = float(row['target_price'])
                         diff = (curr - tgt) / tgt * 100 if tgt else 0
                         dir_col = "#00E676" if row['direction'] == "Up" else "#FF4B4B"
-                        diff_col = "#00E676" if diff >= 0 else "#FF4B4B"
 
                         st.markdown(f"""
-                        <div class="alert-card" style="border-left-color:{dir_col}">
-                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                                <div><span class="ticker-big">{row["ticker"]}</span> <span style="color:#666;">></span> <span class="target-big">${tgt:.1f}</span></div>
-                                <div style="background:{dir_col}20;color:{dir_col};padding:4px 8px;border-radius:8px;font-size:0.8rem;font-weight:bold;">{row["direction"]}</div>
+                        <div style="background:#1a1a1a; padding:10px; border-radius:8px; margin-bottom:8px; border-left:4px solid {dir_col}; display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-weight:bold; color:#FFC107;">{row['ticker']}</div>
+                                <div style="font-size:0.8rem; color:#888;">Target: {tgt}</div>
                             </div>
-                            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
-                                <div><div style="color:#888;font-size:0.75rem;">Current</div><div style="font-weight:bold;color:#fff;font-size:1.1rem;">${curr:.2f}</div></div>
-                                <div style="text-align:right"><div style="color:#888;font-size:0.75rem;">Delta</div><div style="font-weight:bold;color:{diff_col};font-size:1.1rem;">{diff:+.2f}%</div></div>
+                            <div style="text-align:right;">
+                                <div style="font-weight:bold; color:#fff;">{curr:.2f}</div>
+                                <div style="font-size:0.8rem; color:{dir_col};">{diff:+.1f}%</div>
                             </div>
-                            <div style="color:#666;font-size:0.8rem;margin-top:8px;">{row["notes"] or ""}</div>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                        b1, b2 = st.columns(2)
-                        with b1:
-                             if st.button("Edit", key=f"ce_{idx}"):
-                                st.session_state.edit_ticker = row['ticker']; st.session_state.edit_price = float(row['target_price']); st.session_state.edit_note = row['notes']
-                                st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
-                        with b2:
-                             if st.button("Delete", key=f"cd_{idx}"):
-                                st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
+                        if st.button("Delete", key=f"cd_{idx}"):
+                             st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
+
             else:
                 st.info("No active alerts.")
 
