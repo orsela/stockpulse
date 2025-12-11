@@ -236,7 +236,7 @@ def check_alerts():
         st.rerun()
 
 # ==========================================
-# 5. UI & CSS (FINAL - LOCKED DASHBOARD + FIXED TABLE)
+# 5. UI & CSS (FINAL - MATCHING VISUAL DESIGN)
 # ==========================================
 def apply_custom_ui():
     st.markdown("""
@@ -272,46 +272,46 @@ def apply_custom_ui():
         }
         label { color: #cccccc !important; font-weight: 500 !important; }
 
-        /* --- 3. COMPACT TABLE FIXES (NEW) --- */
+        /* --- 3. TABLE STYLE (MATCHING VISUAL) --- */
         
-        /* Remove Gaps in the Table area specifically */
+        /* Remove Gaps */
         div[data-testid="column"] { padding: 0px !important; }
         div[data-testid="stHorizontalBlock"] { gap: 0px !important; }
         
-        /* Table Text Style */
+        /* Table Header - Centered */
         .tbl-header { 
             font-size: 0.7rem; color: #888; font-weight: bold; text-transform: uppercase; 
-            text-align: left; padding-left: 4px; margin-bottom: 2px;
+            text-align: center; /* CENTERED */
+            margin-bottom: 4px;
         }
         
+        /* Table Cell - Centered */
         .tbl-cell { 
             font-family: 'Roboto Mono', monospace; font-size: 0.8rem; color: #fff; 
-            padding: 8px 0px 8px 4px; /* Vertical align with button */
+            padding: 10px 4px; /* Adjusted padding */
+            text-align: center; /* CENTERED */
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         
         .tbl-cell-dim { color: #aaa; }
         
-        /* Minimal Action Buttons (The "Control Set") */
+        /* Minimal Action Buttons */
         div.stButton > button {
-            padding: 0px !important;
-            margin: 0px !important;
-            font-size: 1rem !important; /* Icon size */
-            line-height: 1 !important;
-            height: 30px !important;
-            width: 30px !important;
-            border: none !important;
-            background: transparent !important;
-            color: #666 !important;
+            padding: 0px !important; margin: 0px !important;
+            font-size: 1.1rem !important; line-height: 1 !important;
+            height: 34px !important; width: 34px !important;
+            border: none !important; background: transparent !important;
+            color: #666 !important; display: flex; justify-content: center; align-items: center;
         }
-        div.stButton > button:hover {
-            color: #fff !important;
-            background: #333 !important;
-            border-radius: 4px;
-        }
+        div.stButton > button:hover { color: #fff !important; background: #333 !important; border-radius: 4px; }
         
-        /* Row Separator */
-        .row-sep { height: 1px; background: #222; margin: 0; }
+        /* Table Row Container with Border */
+        .table-row {
+            border: 1px solid; /* Color set inline */
+            border-radius: 6px;
+            margin-bottom: 4px;
+            background: #1a1a1a;
+        }
 
     </style>
     """, unsafe_allow_html=True)
@@ -369,7 +369,7 @@ def main():
     # TABS
     tab_alerts, tab_calc, tab_hist = st.tabs(["🔔 Active", "🛡️ Calc", "📂 Log"])
     
-    # 1. ALERTS TAB (RE-ENGINEERED)
+    # 1. ALERTS TAB (MATCHING VISUAL)
     with tab_alerts:
         col_list, col_add = st.columns([2, 1])
         active_view = st.session_state.alert_db[st.session_state.alert_db['status'] == 'Active']
@@ -380,27 +380,34 @@ def main():
             if not active_view.empty:
                 if view_mode == "Table":
                     with st.container():
-                        # STRICT RATIOS
-                        ratios = [1.5, 1.2, 1.2, 1.0] 
+                        # RATIOS for centered look
+                        ratios = [1.2, 1.2, 1.2, 1.2] 
                         
                         # HEADER
                         h1, h2, h3, h4 = st.columns(ratios)
-                        h1.markdown("<div class='tbl-header'>SYM</div>", unsafe_allow_html=True)
-                        h2.markdown("<div class='tbl-header'>TGT</div>", unsafe_allow_html=True)
-                        h3.markdown("<div class='tbl-header'>CUR</div>", unsafe_allow_html=True)
+                        h1.markdown("<div class='tbl-header'>Ticker</div>", unsafe_allow_html=True)
+                        h2.markdown("<div class='tbl-header'>Tgt</div>", unsafe_allow_html=True)
+                        h3.markdown("<div class='tbl-header'>Cur</div>", unsafe_allow_html=True)
                         h4.markdown("<div class='tbl-header'>ACT</div>", unsafe_allow_html=True)
-                        st.markdown("<div style='height:1px; background:#444; margin-bottom:2px;'></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='margin-bottom:5px;'></div>", unsafe_allow_html=True)
 
                         # ROWS
                         for idx, row in active_view.iterrows():
-                            c1, c2, c3, c4 = st.columns(ratios)
+                            curr = float(row['current_price'] or 0)
+                            tgt = float(row['target_price'])
+                            # Border color logic: Red if current > target, else Green
+                            border_col = "#FF4B4B" if curr > tgt else "#00E676"
+
+                            # Wrap row in bordered container
+                            st.markdown(f'<div class="table-row" style="border-color: {border_col};">', unsafe_allow_html=True)
                             
+                            c1, c2, c3, c4 = st.columns(ratios)
                             c1.markdown(f"<div class='tbl-cell' style='color:#FFC107; font-weight:bold;'>{row['ticker']}</div>", unsafe_allow_html=True)
-                            c2.markdown(f"<div class='tbl-cell'>{float(row['target_price']):.1f}</div>", unsafe_allow_html=True)
-                            c3.markdown(f"<div class='tbl-cell tbl-cell-dim'>{float(row['current_price']):.1f}</div>", unsafe_allow_html=True)
+                            c2.markdown(f"<div class='tbl-cell'>{tgt:.1f}</div>", unsafe_allow_html=True)
+                            c3.markdown(f"<div class='tbl-cell tbl-cell-dim'>{curr:.1f}</div>", unsafe_allow_html=True)
                             
                             with c4:
-                                # Tight Action Buttons
+                                # Centered Action Buttons
                                 b1, b2 = st.columns(2)
                                 with b1:
                                     if st.button("✏️", key=f"ed_{idx}"):
@@ -412,9 +419,10 @@ def main():
                                     if st.button("✕", key=f"del_{idx}"):
                                         st.session_state.alert_db.drop(idx, inplace=True); st.session_state.alert_db.reset_index(drop=True, inplace=True); sync_db(st.session_state.alert_db); st.rerun()
                             
-                            st.markdown("<div class='row-sep'></div>", unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True) # Close row container
+
                 else: 
-                    # CARD VIEW
+                    # CARD VIEW (unchanged)
                     for idx, row in active_view.iterrows():
                         curr = float(row['current_price'] or 0); tgt = float(row['target_price'])
                         diff = (curr - tgt) / tgt * 100 if tgt else 0
